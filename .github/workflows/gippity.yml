@@ -1,7 +1,8 @@
 name: GipPity CI
 
 # This fork carries only @howaboua/pi-gippity-control. The upstream monorepo
-# workflows were removed: they publish, need upstream secrets, or require the
+# workflows (including the Changesets npm release) were removed: they publish,
+# need upstream secrets, or require the
 # prebuilt helper binaries that this fork builds from source instead.
 
 on:
