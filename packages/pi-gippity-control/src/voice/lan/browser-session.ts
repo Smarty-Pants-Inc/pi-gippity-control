@@ -81,13 +81,19 @@ export class LanVoiceBrowserSession {
 		}
 	}
 
+	/**
+	 * Releases the client's audio. The returned promise settles when the
+	 * release has run: it resolves once this client owns no conversation and
+	 * rejects when ending the conversation failed. Errors also reach the
+	 * client's event stream.
+	 */
 	release(
 		clientId: string,
 		socket?: WebSocket,
 		terminateConversation = false,
-	): void {
+	): Promise<void> {
 		this.releaseStarting(clientId, socket);
-		void this.enqueue(async () => {
+		const released = this.enqueue(async () => {
 			const active = this.state;
 			const ownsActive =
 				active.type === "active" &&
@@ -104,12 +110,14 @@ export class LanVoiceBrowserSession {
 			if (!ownsActive) return;
 			if (active.mode === "dictation")
 				await this.options.finishDictation(clientId);
-		}).catch((error: unknown) =>
+		});
+		released.catch((error: unknown) =>
 			this.connections.sendControl(clientId, {
 				type: "error",
 				message: errorMessage(error),
 			}),
 		);
+		return released;
 	}
 
 	releaseStarting(clientId: string, socket?: WebSocket): void {

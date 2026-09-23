@@ -59,8 +59,8 @@ export class LanVoiceBrowserClients {
 		clientId: string,
 		socket?: WebSocket,
 		terminateConversation = false,
-	): void {
-		this.session.release(clientId, socket, terminateConversation);
+	): Promise<void> {
+		return this.session.release(clientId, socket, terminateConversation);
 	}
 
 	heartbeat(): void {

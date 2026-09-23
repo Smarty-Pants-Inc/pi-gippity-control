@@ -1,7 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import { EventEmitter } from "node:events";
+import type { IncomingMessage, ServerResponse } from "node:http";
+import { Readable } from "node:stream";
 import { WebSocket } from "ws";
 import { LanVoiceBrowserClients } from "../src/voice/lan/browser-clients.ts";
+import {
+	handleLanVoiceHttpRequest,
+	type LanVoiceHttpHandlers,
+} from "../src/voice/lan/http-handler.ts";
 import { decodeLanVoiceAudioCommand } from "../src/voice/lan/protocol.ts";
 
 describe("LAN conversation setup", () => {
@@ -105,6 +111,97 @@ describe("LAN conversation setup", () => {
 		await clients.close();
 	});
 });
+
+describe("terminating stop confirms the end", () => {
+	for (const outcome of ["resolve", "reject"] as const)
+		test(`waits for the conversation to end (${outcome})`, async () => {
+			const ending = Promise.withResolvers<void>();
+			const clients = testBrowserClients({
+				async ensureConversation() {},
+				onConversationActivity: (active) =>
+					active ? undefined : ending.promise,
+			});
+			const socket = new TestWebSocket();
+			clients.connectAudio("code-1", socket.asWebSocket());
+			socket.receive({ type: "start", mode: "conversation" });
+			await settle();
+			const replies: Array<{ status: number; body: unknown }> = [];
+			const stop = handleLanVoiceHttpRequest(
+				stopRequest("code-1"),
+				recordResponse(replies),
+				stopHandlers(clients),
+			);
+			await settle();
+			expect(replies).toEqual([]);
+			if (outcome === "resolve") ending.resolve();
+			else ending.reject(new Error("helper did not stop"));
+			await stop;
+			expect(replies).toEqual(
+				outcome === "resolve"
+					? [{ status: 200, body: { ok: true, ended: true } }]
+					: [{ status: 500, body: { error: "helper did not stop" } }],
+			);
+			await clients.close();
+		});
+
+	test("a client that owns no conversation is ended at once", async () => {
+		const clients = testBrowserClients({ async ensureConversation() {} });
+		const replies: Array<{ status: number; body: unknown }> = [];
+		await handleLanVoiceHttpRequest(
+			stopRequest("nobody"),
+			recordResponse(replies),
+			stopHandlers(clients),
+		);
+		expect(replies).toEqual([{ status: 200, body: { ok: true, ended: true } }]);
+		await clients.close();
+	});
+});
+
+function stopRequest(clientId: string): IncomingMessage {
+	const request = Readable.from([
+		Buffer.from(JSON.stringify({ clientId, terminateConversation: true })),
+	]) as unknown as IncomingMessage;
+	Object.assign(request, {
+		method: "POST",
+		url: "/api/stop",
+		headers: {
+			host: "127.0.0.1:43120",
+			"content-type": "application/json",
+			authorization: "Bearer t",
+		},
+	});
+	return request;
+}
+
+function recordResponse(
+	replies: Array<{ status: number; body: unknown }>,
+): ServerResponse {
+	let status = 0;
+	return {
+		headersSent: false,
+		setHeader() {},
+		writeHead(code: number) {
+			status = code;
+		},
+		end(body: string) {
+			replies.push({ status, body: JSON.parse(body) });
+		},
+	} as unknown as ServerResponse;
+}
+
+function stopHandlers(clients: LanVoiceBrowserClients) {
+	return {
+		access: {
+			hostAllowed: () => true,
+			originAllowed: () => true,
+			bearer: () => true,
+		},
+		clients,
+		ownerIsActive: () => true,
+		closing: false,
+		webApp: () => ({ customWebApp: false, discovery: {} }),
+	} as unknown as LanVoiceHttpHandlers;
+}
 
 function testBrowserClients(overrides: {
 	ensureConversation(): Promise<void>;
