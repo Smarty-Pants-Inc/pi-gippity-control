@@ -144,6 +144,37 @@ describe("terminating stop confirms the end", () => {
 			await clients.close();
 		});
 
+	test("a retry after a failed end ends the call instead of reporting it ended", async () => {
+		let attempts = 0;
+		const clients = testBrowserClients({
+			async ensureConversation() {},
+			onConversationActivity: (active) => {
+				if (active) return undefined;
+				attempts += 1;
+				return attempts === 1
+					? Promise.reject(new Error("helper did not stop"))
+					: Promise.resolve();
+			},
+		});
+		const socket = new TestWebSocket();
+		clients.connectAudio("code-1", socket.asWebSocket());
+		socket.receive({ type: "start", mode: "conversation" });
+		await settle();
+		const replies: Array<{ status: number; body: unknown }> = [];
+		for (let i = 0; i < 2; i++)
+			await handleLanVoiceHttpRequest(
+				stopRequest("code-1"),
+				recordResponse(replies),
+				stopHandlers(clients),
+			);
+		expect(replies).toEqual([
+			{ status: 500, body: { error: "helper did not stop" } },
+			{ status: 200, body: { ok: true, ended: true } },
+		]);
+		expect(attempts).toBe(2);
+		await clients.close();
+	});
+
 	test("a client that owns no conversation is ended at once", async () => {
 		const clients = testBrowserClients({ async ensureConversation() {} });
 		const replies: Array<{ status: number; body: unknown }> = [];

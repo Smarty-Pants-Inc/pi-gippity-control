@@ -104,7 +104,13 @@ export class LanVoiceBrowserSession {
 				this.microphoneLevel.reset();
 			if (terminateConversation && this.conversationOwnerId === clientId) {
 				this.conversationOwnerId = undefined;
-				await this.options.onConversationActivity(false);
+				try {
+					await this.options.onConversationActivity(false);
+				} catch (error) {
+					// Keep ownership so a retry ends the call instead of reporting it ended.
+					this.conversationOwnerId ??= clientId;
+					throw error;
+				}
 				return;
 			}
 			if (!ownsActive) return;
