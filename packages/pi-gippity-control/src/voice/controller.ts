@@ -292,6 +292,8 @@ export class CodexVoiceController {
 
 	agentStarted(): void {
 		this.messages.agentStarted();
+		if (this.runtime.state.type === "conversation")
+			this.runtime.state.session.agentTurnStarted();
 	}
 
 	filterContext(messages: ContextEvent["messages"]): ContextEvent["messages"] {

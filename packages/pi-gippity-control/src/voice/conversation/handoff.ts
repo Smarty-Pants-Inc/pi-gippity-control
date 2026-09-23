@@ -43,6 +43,16 @@ export class RealtimeDelegationHandoff {
 		this.target = { type: "delegation", id };
 	}
 
+	/**
+	 * A Pi turn that voice did not start, such as a Fabric or supervisor steer,
+	 * still reports to the live call on the session channel, like Codex's
+	 * standalone handoff. A voice delegation or typed input keeps its own target.
+	 */
+	beginStandalone(): void {
+		if (this.callbacks.isActive() && !this.target)
+			this.target = { type: "session" };
+	}
+
 	piInput(
 		input: unknown,
 		streamingBehavior?: RealtimePiInputBehavior,

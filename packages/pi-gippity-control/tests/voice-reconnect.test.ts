@@ -66,6 +66,25 @@ test("realtime forwards final speech before reporting established drops", async 
 	await active.session.close();
 });
 
+test("a Pi turn without a voice delegation reaches the live call", async () => {
+	const live = createConversation("ready");
+	await live.session.start(
+		AUTH,
+		DEFAULT_GIPPITY_CONTROL_CONFIG,
+		"instructions",
+	);
+	// A Fabric steer starts a Pi turn; voice asked for nothing.
+	live.session.agentTurnStarted();
+	const reply = "Supervisor asked for status. CI is green.";
+	live.session.streamAgentDelta(reply);
+	live.session.agentResult(reply);
+	live.session.settleAgentTurn();
+	assert.deepEqual(live.peer.sentText(), [
+		["session.context.append", "speakable", reply],
+	]);
+	await live.session.close();
+});
+
 function createConversation(answerState: "ready" | "closed"): {
 	session: CodexRealtimeConversation;
 	peer: FakeRealtimePeer;

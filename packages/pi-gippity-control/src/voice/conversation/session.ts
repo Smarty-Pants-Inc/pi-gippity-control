@@ -198,6 +198,10 @@ export class CodexRealtimeConversation {
 		this.handoff.progress(content);
 	}
 
+	agentTurnStarted(): void {
+		this.handoff.beginStandalone();
+	}
+
 	agentResult(content: string): void {
 		this.handoff.result(content);
 	}
