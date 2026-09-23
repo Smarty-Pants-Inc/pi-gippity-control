@@ -197,12 +197,26 @@ export async function handleLanVoiceHttpRequest(
 			return;
 		}
 		if (path === "/api/stop") {
-			handlers.clients.release(
-				clientId,
-				undefined,
-				body["terminateConversation"] === true,
-			);
-			sendJson(response, 200, { ok: true });
+			const terminate = body["terminateConversation"] === true;
+			const released = handlers.clients.release(clientId, undefined, terminate);
+			if (!terminate) {
+				void released.catch(() => {});
+				sendJson(response, 200, { ok: true });
+				return;
+			}
+			// ended: after this release, the client owns no conversation.
+			try {
+				await released;
+			} catch (error) {
+				sendJson(response, 500, {
+					error: (error instanceof Error ? error.message : String(error)).slice(
+						0,
+						500,
+					),
+				});
+				return;
+			}
+			sendJson(response, 200, { ok: true, ended: true });
 			return;
 		}
 		if (path === "/api/draft") {
