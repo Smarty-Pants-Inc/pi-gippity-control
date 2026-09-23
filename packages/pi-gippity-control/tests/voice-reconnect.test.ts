@@ -1,8 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { DEFAULT_GIPPITY_CONTROL_CONFIG } from "../src/config.ts";
+import {
+	DEFAULT_GIPPITY_CONTROL_CONFIG,
+	normalizeGippityControlConfig,
+} from "../src/config.ts";
 import type { CodexVoiceAuth } from "../src/voice/auth.ts";
-import type { RealtimeCallSetup } from "../src/voice/conversation/call-setup.ts";
+import {
+	buildRealtimeCallRequest,
+	type RealtimeCallSetup,
+} from "../src/voice/conversation/call-setup.ts";
 import type {
 	CodexRealtimePeerEvent,
 	CodexRealtimeWebRtcPeer,
@@ -85,12 +91,38 @@ test("a Pi turn without a voice delegation reaches the live call", async () => {
 	await live.session.close();
 });
 
+test("live transcript deltas keep their spaces; the call uses v3Voice", async () => {
+	const live = createConversation("ready");
+	await live.session.start(
+		AUTH,
+		DEFAULT_GIPPITY_CONTROL_CONFIG,
+		"instructions",
+	);
+	live.peer.transcript("assistant", "Hey");
+	live.peer.transcript("assistant", " there!");
+	live.peer.transcript("user", " and you");
+	assert.deepEqual(live.live, [
+		"assistant:Hey",
+		"assistant: there!",
+		"user: and you",
+	]);
+	await live.session.close();
+	const request = buildRealtimeCallRequest(
+		"sdp",
+		normalizeGippityControlConfig({ voice: { v3Voice: "sol" } }),
+		"instructions",
+	) as { session: { audio: { output: { voice: string } } } };
+	assert.equal(request.session.audio.output.voice, "sol");
+});
+
 function createConversation(answerState: "ready" | "closed"): {
 	session: CodexRealtimeConversation;
 	peer: FakeRealtimePeer;
 	failures: string[];
 	drops: string[];
+	live: string[];
 } {
+	const live: string[] = [];
 	const failures: string[] = [];
 	const drops: string[] = [];
 	const peer = new FakeRealtimePeer(answerState);
@@ -101,6 +133,7 @@ function createConversation(answerState: "ready" | "closed"): {
 		onTurn: () => {},
 		onUserTranscript: () => {},
 		onTranscriptTail: () => {},
+		onLiveTranscript: (role, text) => live.push(`${role}:${text}`),
 	};
 	const session = new CodexRealtimeConversation(callbacks, peer);
 	(session as unknown as { callSetup: RealtimeCallSetup }).callSetup =
@@ -108,7 +141,7 @@ function createConversation(answerState: "ready" | "closed"): {
 			status: 201,
 			answer: "answer",
 		});
-	return { session, peer, failures, drops };
+	return { session, peer, failures, drops, live };
 }
 
 class FakeRealtimePeer implements CodexRealtimeWebRtcPeer {
