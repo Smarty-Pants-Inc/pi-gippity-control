@@ -12,6 +12,7 @@ import {
 } from "./realtime-voice.ts";
 import { CodexVoiceController } from "./voice/controller.ts";
 import { createCodexVoiceControls } from "./voice/controls.ts";
+import { VoiceEditorStatus } from "./voice/editor-status.ts";
 import { CodexLanVoiceServerController } from "./voice/lan/controller.ts";
 import { registerLanRemoteCreateRenderers } from "./voice/lan/create.ts";
 import { GippityRemoteApps } from "./voice/lan/remote-app.ts";
@@ -24,7 +25,8 @@ export function registerGippityControl(pi: ExtensionAPI): void {
 	const state: { config: GippityControlConfig } = {
 		config: readGippityControlConfig(),
 	};
-	const voice = new CodexVoiceController(pi);
+	const editorStatus = new VoiceEditorStatus();
+	const voice = new CodexVoiceController(pi, editorStatus);
 	const remoteApps = new GippityRemoteApps(pi);
 	const lanVoice = new CodexLanVoiceServerController(
 		pi,
@@ -40,6 +42,7 @@ export function registerGippityControl(pi: ExtensionAPI): void {
 			),
 		dirname(getGippityControlConfigPath()),
 		remoteApps,
+		editorStatus,
 	);
 	const voiceControls = createCodexVoiceControls({
 		pi,

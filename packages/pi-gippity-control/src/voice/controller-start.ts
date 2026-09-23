@@ -89,6 +89,11 @@ export async function startControllerMode(options: {
 	onError(error: Error, session?: CodexRealtimeConversation | undefined): void;
 	onDrop(session: CodexRealtimeConversation, error: Error): void;
 	onStatus(status: string): void;
+	onLiveTranscript?(
+		role: "user" | "assistant",
+		text: string,
+		final: boolean,
+	): void;
 }): Promise<CodexRealtimeConversation | undefined> {
 	const { runtime, signal } = options;
 	if (signal?.aborted) return;
@@ -257,6 +262,9 @@ async function startConversation(
 				options.messages.userTranscript(transcript),
 			onTranscriptTail: (transcript) =>
 				options.messages.retainTranscriptTail(transcript),
+			...(options.onLiveTranscript
+				? { onLiveTranscript: options.onLiveTranscript }
+				: {}),
 		},
 	});
 }

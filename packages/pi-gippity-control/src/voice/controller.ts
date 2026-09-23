@@ -28,6 +28,7 @@ import {
 	voiceModeForState,
 } from "./controller-support.ts";
 import type { CodexRealtimeConversation } from "./conversation/session.ts";
+import type { VoiceEditorStatus } from "./editor-status.ts";
 import { completedVoiceReasoningSummary } from "./reasoning-summary.ts";
 import { CodexVoiceSessionMessages } from "./session-messages.ts";
 import { formatVoiceAudioError } from "./setup.ts";
@@ -45,7 +46,10 @@ export class CodexVoiceController {
 	private readonly inputMuteListeners = new Set<(muted: boolean) => void>();
 	private readonly activePrompts = new Map<string, string>();
 
-	constructor(pi: ExtensionAPI) {
+	private readonly editorStatus: VoiceEditorStatus | undefined;
+
+	constructor(pi: ExtensionAPI, editorStatus?: VoiceEditorStatus) {
+		this.editorStatus = editorStatus;
 		this.messages = new CodexVoiceSessionMessages(pi, {
 			canDelegate: () => this.runtime.state.type === "conversation",
 			onDelegation: (id) => {
@@ -231,6 +235,8 @@ export class CodexVoiceController {
 			onError: (error, session) => this.fail(error, session),
 			onDrop: (session, error) => this.drop(session, error),
 			onStatus: (status) => this.renderStatus(status),
+			onLiveTranscript: (role, text, final) =>
+				this.editorStatus?.transcript(role, text, final),
 		});
 		const activePrompt = Array.from(this.activePrompts.values()).at(-1);
 		if (session && activePrompt) session.announcePrompt(activePrompt);
@@ -255,6 +261,7 @@ export class CodexVoiceController {
 		this.runtime.voiceStatus = "";
 		this.runtime.inputTooQuiet = false;
 		this.runtime.context?.ui.setStatus(VOICE_STATUS_KEY, undefined);
+		this.editorStatus?.setCall(this.runtime.context, undefined);
 		await closePromise;
 		if (wasMuted)
 			for (const listener of this.inputMuteListeners) listener(false);
@@ -287,6 +294,7 @@ export class CodexVoiceController {
 		this.runtime.voiceStatus = "";
 		this.runtime.inputTooQuiet = false;
 		this.runtime.context?.ui.setStatus(VOICE_STATUS_KEY, undefined);
+		this.editorStatus?.setCall(this.runtime.context, undefined);
 		this.messages.voiceStopped(endedMode);
 	}
 
@@ -434,6 +442,7 @@ export class CodexVoiceController {
 		this.runtime.voiceStatus = "";
 		this.runtime.inputTooQuiet = false;
 		this.runtime.context?.ui.setStatus(VOICE_STATUS_KEY, undefined);
+		this.editorStatus?.setCall(this.runtime.context, undefined);
 		this.runtime.context?.ui.notify(message, "error");
 		this.messages.voiceStopped(endedMode);
 		if (wasMuted)
@@ -473,6 +482,19 @@ export class CodexVoiceController {
 	}
 
 	private renderCurrentStatus(): void {
+		const ctx = this.runtime.context;
+		if (
+			ctx &&
+			this.runtime.voiceStatus &&
+			this.editorStatus?.setCall(ctx, {
+				status: this.runtime.voiceStatus,
+				muted: this.inputMuted,
+				quiet: this.runtime.inputTooQuiet,
+			})
+		) {
+			ctx.ui.setStatus(VOICE_STATUS_KEY, undefined);
+			return;
+		}
 		renderVoiceStatus(
 			this.runtime.context,
 			this.runtime.voiceStatus,

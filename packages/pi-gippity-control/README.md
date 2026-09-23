@@ -57,6 +57,10 @@ Any browser that reaches the server can run Pi methods, so the server is locked 
 - Remote apps can call only an allowlist of RPC methods (`LAN_REMOTE_RPC_ALLOWLIST` in `src/voice/lan/rpc.ts`). `exec`, `sendUserMessage`, provider and tool changes, `shutdown` and every dotted SDK path are refused. The bundled UI uses no RPC.
 - `lan.host` is an explicit opt-in for one other bind address. It accepts only loopback or a Tailscale address (`100.64.0.0/10`, `fd7a:115c:a1e0::/48`). Wildcard (`0.0.0.0`, `::`) and LAN addresses are refused.
 
+### Status in the input box (Smarty fork)
+
+In the TUI, GipPity shows its state on the editor border instead of the footer, so a call or the LAN server adds no rows. The top border shows the LAN indicator, an activity wave, the call phase and mute. The bottom border shows the rolling transcript of both sides. Labels are right-aligned and cut to fit narrow terminals. GipPity wraps whichever editor is active and restores it when the call and the LAN server end; Pi keeps the typed text across the swap. Without a TUI editor, the footer status is used as before.
+
 ### Realtime through a gateway (Smarty fork)
 
 Set `voice.provider` to a Pi provider, such as a CLIProxyAPI gateway, to send realtime calls to `<provider baseUrl>/realtime/calls` with that provider's key. The gateway owns the ChatGPT login and account, so Pi needs no `openai-codex` login. Dictation still requires the `openai-codex` login.
