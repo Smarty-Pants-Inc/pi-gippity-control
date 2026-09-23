@@ -90,6 +90,85 @@ describe("browser audio devices", () => {
 		expect(devices.snapshot().warnings).toEqual([]);
 	});
 
+	test("matches Paul's Yealink through Chrome label suffixes, case-insensitively", async () => {
+		const others = [
+			{
+				kind: "audioinput",
+				deviceId: "default",
+				label: "Default - Yealink BT51 (6993:b0b7)",
+			},
+			{
+				kind: "audioinput",
+				deviceId: "mic-mbp",
+				label: "MacBook Pro Microphone",
+			},
+			{ kind: "audioinput", deviceId: "mic-camo", label: "Camo Microphone" },
+			{
+				kind: "audioinput",
+				deviceId: "mic-phone",
+				label: "Paul's iPhone Microphone",
+			},
+			{
+				kind: "audiooutput",
+				deviceId: "out-mbp",
+				label: "MacBook Pro Speakers",
+			},
+		];
+		for (const [input, output] of [
+			["Yealink BT51 (Bluetooth)", "Yealink BT51 (Bluetooth)"],
+			["Yealink BT51 (6993:b0b7)", "Yealink BT51 (6993:b0b7)"],
+		]) {
+			const { devices } = createDevices([
+				...others,
+				{ kind: "audioinput", deviceId: "mic-yl", label: input },
+				{ kind: "audiooutput", deviceId: "out-yl", label: output },
+			]);
+			devices.setDefaults({
+				inputDevice: "yealink bt51",
+				outputDevice: "YEALINK BT51",
+			});
+			await devices.refresh();
+			expect(devices.inputConstraints({})).toEqual({
+				deviceId: { exact: "mic-yl" },
+			});
+			const context = fakeContext();
+			await devices.attach(context);
+			expect(context.sinks).toEqual(["out-yl"]);
+		}
+	});
+
+	test("never picks the MacBook devices for 'Yealink BT51'", async () => {
+		const { devices } = createDevices([
+			{
+				kind: "audioinput",
+				deviceId: "default",
+				label: "Default - MacBook Pro Microphone",
+			},
+			{
+				kind: "audioinput",
+				deviceId: "mic-mbp",
+				label: "MacBook Pro Microphone",
+			},
+			{ kind: "audioinput", deviceId: "mic-camo", label: "Camo Microphone" },
+			{
+				kind: "audiooutput",
+				deviceId: "out-mbp",
+				label: "MacBook Pro Speakers",
+			},
+		]);
+		devices.setDefaults({
+			inputDevice: "Yealink BT51",
+			outputDevice: "Yealink BT51",
+		});
+		await devices.refresh();
+		// No deviceId constraint: the system default is used, with a warning.
+		expect(devices.inputConstraints({})).toEqual({});
+		const context = fakeContext();
+		await devices.attach(context);
+		expect(context.sinks).toEqual([""]);
+		expect(devices.snapshot().warnings).toHaveLength(2);
+	});
+
 	test("a missing device warns and falls back to the system default", async () => {
 		const { devices } = createDevices(
 			MAC_DEVICES.filter((device) => !device.label.startsWith("Yealink")),
