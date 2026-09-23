@@ -84,12 +84,12 @@ export function registerGippityCommand(options: {
 				try {
 					await ctx.waitForIdle();
 					const status = await lanVoice.setEnabled(true, ctx);
-					const baseUrl = status.urls[0];
-					if (!baseUrl) throw new Error("Control server has no reachable URL");
+					const discovery = status.discovery;
+					if (!discovery) throw new Error("Control server is not running");
 					startLanRemoteCreateTurn(pi, {
 						appDirectory: ctx.cwd,
 						configPath: getGippityControlConfigPath(),
-						discoveryUrl: `${baseUrl}/api/discovery`,
+						discovery,
 					});
 				} catch (error) {
 					ctx.ui.notify(

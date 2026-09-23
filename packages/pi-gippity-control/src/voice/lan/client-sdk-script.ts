@@ -9,6 +9,25 @@ const MICROPHONE_WORKLET_SOURCE = JSON.stringify(
 export const LAN_REMOTE_CLIENT_SCRIPT = String.raw`
 (function (global) {
   'use strict';
+  // The access token arrives in the URL fragment, which is never sent to the
+  // server. Keep it in this origin's sessionStorage and remove it from the URL.
+  const token = (() => {
+    const key = 'gippity-token';
+    try {
+      const fragment = new URLSearchParams(global.location.hash.slice(1));
+      const fromUrl = fragment.get('token');
+      if (fromUrl) {
+        global.sessionStorage.setItem(key, fromUrl);
+        fragment.delete('token');
+        const rest = fragment.toString();
+        global.history.replaceState(global.history.state, '', global.location.pathname + global.location.search + (rest ? '#' + rest : ''));
+      }
+      return global.sessionStorage.getItem(key) || '';
+    } catch { return ''; }
+  })();
+  const authHeaders = (headers) => ({ ...headers, authorization:'Bearer ' + token });
+  const postJson = (path, body, keepalive = false) =>
+    fetch(path, { method:'POST', keepalive, headers:authHeaders({'content-type':'application/json'}), body:JSON.stringify(body) });
   const audioWorkletSource = ${AUDIO_WORKLET_SOURCE};
   const microphoneWorkletSource = ${MICROPHONE_WORKLET_SOURCE};
 
@@ -179,7 +198,7 @@ export const LAN_REMOTE_CLIENT_SCRIPT = String.raw`
           source.connect(processor); processor.connect(context.destination);
         }
         if (currentGeneration !== generation) { closeHardware(); return; }
-        const current = new WebSocket('wss://' + location.host + '/api/audio?client=' + encodeURIComponent(client.clientId));
+        const current = new WebSocket('wss://' + location.host + '/api/audio?client=' + encodeURIComponent(client.clientId), ['gippity.v1', 'gippity.token.' + token]);
         current.binaryType = 'arraybuffer'; socket = current;
         const timer = setTimeout(() => {
           if (socket !== current || current.readyState !== WebSocket.CONNECTING) return;
@@ -227,7 +246,7 @@ export const LAN_REMOTE_CLIENT_SCRIPT = String.raw`
       _pagehide() {
         stream?.getTracks().forEach((track) => track.stop());
 		if (finishing && socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type:'cancel' }));
-		else if (active) navigator.sendBeacon('/api/stop', new Blob([JSON.stringify({ clientId:client.clientId })], {type:'application/json'}));
+		else if (active) void postJson('/api/stop', { clientId:client.clientId }, true).catch(() => {});
       },
 	  _close() { if (finishing) stop(); else { generation += 1; finishStop(true, 'client-closed'); } },
     };
@@ -236,7 +255,7 @@ export const LAN_REMOTE_CLIENT_SCRIPT = String.raw`
   function connect(options = {}) {
     const clientId = options.clientId || id();
     const listeners = new Map();
-    let closed = false, eventSource, rpcId = 0;
+    let closed = false, events, rpcId = 0;
     let draft = { type:'draft', text:'', revision:-1 };
     let dirty = false, syncing = false, syncPromise, timer;
 	let resolveInitialDraft;
@@ -249,7 +268,7 @@ export const LAN_REMOTE_CLIENT_SCRIPT = String.raw`
     };
     const post = async (path, body) => {
       assertOpen();
-      const response = await fetch(path, { method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({ clientId, ...body }) });
+      const response = await postJson(path, { clientId, ...body });
       const result = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(result.error || 'Pi rejected the request');
       return result;
@@ -293,9 +312,9 @@ export const LAN_REMOTE_CLIENT_SCRIPT = String.raw`
       close() {
         if (closed) return; clearTimeout(timer);
         client.audio._close(); closed = true; resolveInitialDraft();
-        navigator.sendBeacon('/api/draft', new Blob([JSON.stringify({ clientId, text:draft.text, revision:draft.revision })], {type:'application/json'}));
+        void postJson('/api/draft', { clientId, text:draft.text, revision:draft.revision }, true).catch(() => {});
 		global.removeEventListener('pagehide', pagehide);
-        eventSource?.close(); listeners.clear();
+        events?.abort(); listeners.clear();
       },
     };
     const flush = async () => {
@@ -338,19 +357,51 @@ export const LAN_REMOTE_CLIENT_SCRIPT = String.raw`
       emit('draft', { ...draft });
     };
     client.audio = createAudio(client, assertOpen);
-    eventSource = new EventSource('/api/events?client=' + encodeURIComponent(clientId));
-    eventSource.onopen = () => emit('connection', { type:'connection', state:'connected' });
-    eventSource.onerror = () => emit('connection', { type:'connection', state:'reconnecting' });
-    eventSource.onmessage = (event) => {
+    const receiveEvent = (data) => {
       try {
-        const command = JSON.parse(event.data);
+        const command = JSON.parse(data);
         client.audio._serverCommand(command);
         if (command.type === 'draft') applyDraft(command);
         else emit(command.type, command);
 		if (command.type === 'pi.event') emit('pi:' + command.event, command.data, false);
       } catch {}
     };
-	const pagehide = () => { client.audio._pagehide(); clearTimeout(timer); navigator.sendBeacon('/api/draft', new Blob([JSON.stringify({ clientId, text:draft.text, revision:draft.revision })], {type:'application/json'})); };
+    // Server-Sent Events over fetch, because EventSource cannot send the token.
+    const readEvents = async () => {
+      while (!closed) {
+        const controller = new AbortController(); events = controller;
+        try {
+          const response = await fetch('/api/events?client=' + encodeURIComponent(clientId), { headers:authHeaders({ accept:'text/event-stream' }), cache:'no-store', signal:controller.signal });
+          if (response.status === 401) {
+            emit('error', { type:'error', source:'connection', message:'GipPity needs its access token. Open the URL that Pi shows.' });
+            return;
+          }
+          if (!response.ok || !response.body) throw new Error('GipPity events failed');
+          emit('connection', { type:'connection', state:'connected' });
+          const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
+          let buffer = '';
+          for (;;) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            buffer += value;
+            for (let end = buffer.indexOf('\n\n'); end >= 0; end = buffer.indexOf('\n\n')) {
+              const block = buffer.slice(0, end); buffer = buffer.slice(end + 2);
+              let name = 'message'; const data = [];
+              for (const line of block.split('\n')) {
+                if (line.startsWith('event:')) name = line.slice(6).trim();
+                else if (line.startsWith('data:')) data.push(line.slice(5).replace(/^ /, ''));
+              }
+              if (name === 'message' && data.length) receiveEvent(data.join('\n'));
+            }
+          }
+        } catch {}
+        if (closed) return;
+        emit('connection', { type:'connection', state:'reconnecting' });
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+      }
+    };
+    void readEvents();
+	const pagehide = () => { client.audio._pagehide(); clearTimeout(timer); void postJson('/api/draft', { clientId, text:draft.text, revision:draft.revision }, true).catch(() => {}); };
 	global.addEventListener('pagehide', pagehide);
     return client;
   }

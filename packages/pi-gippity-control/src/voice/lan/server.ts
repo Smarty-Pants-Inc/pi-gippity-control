@@ -14,6 +14,11 @@ import type { CodexVoiceAuth } from "../auth.ts";
 import type { CodexVoiceController } from "../controller.ts";
 import type { RealtimePeerPlan } from "../controller-start.ts";
 import type { CodexRealtimeConversation } from "../conversation/session.ts";
+import {
+	LAN_AUDIO_SUBPROTOCOL,
+	LanAccess,
+	resolveLanBindHost,
+} from "./access.ts";
 import { LanVoiceActivity } from "./activity.ts";
 import { createLanVoiceWebManifest } from "./app-assets.ts";
 import {
@@ -38,7 +43,8 @@ import {
 import {
 	collectFailures,
 	configureServer,
-	lanVoiceUrls,
+	lanVoiceAccessUrl,
+	lanVoiceOrigin,
 	listen,
 } from "./server-runtime.ts";
 import { createLanVoiceWebUi } from "./web-ui.ts";
@@ -47,7 +53,12 @@ const HEARTBEAT_MS = 15_000;
 
 export interface CodexLanVoiceServer {
 	readonly ownerSessionId: string;
+	/** Browser entry URLs; they carry the access token. */
 	readonly urls: string[];
+	/** Discovery data for `/gippity create`; it carries no credential. */
+	discovery(): unknown;
+	/** The address the listener is bound to. */
+	readonly address: AddressInfo;
 	readonly customWebAppReady: boolean;
 	agentStarted(): void;
 	agentSettled(text?: string): void;
@@ -90,6 +101,8 @@ export async function startCodexLanVoiceServer(options: {
 		};
 	};
 	const initialConfig = options.getConfig();
+	const bindHost = resolveLanBindHost(initialConfig.lan.host);
+	const access = new LanAccess();
 	const initialWebApp = resolveWebApp(initialConfig);
 	const certificate = await resolveLanVoiceCertificate(
 		options.certificateAgentDir,
@@ -243,6 +256,7 @@ export async function startCodexLanVoiceServer(options: {
 		{ cert: certificate.cert, key: certificate.key },
 		(request, response) => {
 			void handleLanVoiceHttpRequest(request, response, {
+				access,
 				activity,
 				clients,
 				draft,
@@ -287,10 +301,17 @@ export async function startCodexLanVoiceServer(options: {
 	const webSockets = new WebSocketServer({
 		noServer: true,
 		maxPayload: MAX_CONTROL_BYTES,
+		handleProtocols: (protocols) =>
+			protocols.has(LAN_AUDIO_SUBPROTOCOL) ? LAN_AUDIO_SUBPROTOCOL : false,
 	});
 	server.on("upgrade", (request, socket, head) => {
 		try {
 			const url = new URL(request.url ?? "/", "https://lan-voice.local");
+			if (!access.upgrade(request)) {
+				socket.write("HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n");
+				socket.destroy();
+				return;
+			}
 			const clientId = boundedString(url.searchParams.get("client"), 128);
 			if (
 				url.pathname !== "/api/audio" ||
@@ -314,6 +335,7 @@ export async function startCodexLanVoiceServer(options: {
 		await listen(
 			server,
 			options.port ?? initialConfig.lan.port ?? DEFAULT_GIPPITY_LAN_PORT,
+			bindHost,
 		);
 	} catch (error) {
 		removeInputMuteListener();
@@ -326,11 +348,9 @@ export async function startCodexLanVoiceServer(options: {
 	}
 	const heartbeat = setInterval(() => clients.heartbeat(), HEARTBEAT_MS);
 	const address = server.address() as AddressInfo;
-	const urls = lanVoiceUrls(
-		certificate.hostnames,
-		certificate.ipAddresses,
-		address.port,
-	);
+	const origin = lanVoiceOrigin(address.address, address.port);
+	access.bind(address.address, address.port);
+	const urls = [lanVoiceAccessUrl(origin, access.token)];
 	let closePromise: Promise<void> | undefined;
 	const closeServer = async (): Promise<void> => {
 		closing = true;
@@ -373,6 +393,8 @@ export async function startCodexLanVoiceServer(options: {
 	return {
 		ownerSessionId: options.ownerSessionId,
 		urls,
+		discovery: () => resolveWebApp(options.getConfig()).discovery,
+		address,
 		customWebAppReady: Boolean(initialWebApp.customApp),
 		agentStarted: () => activity.working(),
 		agentSettled: (text) => activity.settled(text),

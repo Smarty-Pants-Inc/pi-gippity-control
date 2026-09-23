@@ -1,3 +1,5 @@
+import { LAN_REMOTE_RPC_ALLOWLIST } from "./rpc.ts";
+
 const LAN_REMOTE_PROTOCOL_VERSION = 1;
 export const LAN_REMOTE_CLIENT_PATH = "/_gippity/client.js";
 export const LAN_REMOTE_DISCOVERY_PATH = "/api/discovery";
@@ -11,7 +13,15 @@ export function createLanRemoteDiscovery(options: {
 	return {
 		name: "GipPity remote control",
 		protocolVersion: LAN_REMOTE_PROTOCOL_VERSION,
-		trustedNetwork: true,
+		trustedNetwork: false,
+		auth: {
+			token:
+				"Each server start creates a random token. Pi shows a URL with #token=<token>; the hosted client reads it from the fragment, keeps it in sessionStorage for this origin, and removes it from the address bar.",
+			http: "Every /api/ request needs Authorization: Bearer <token> and a Host of this server. Cookies are not used.",
+			audio:
+				"Browsers open the audio WebSocket with subprotocols ['gippity.v1', 'gippity.token.<token>'] from this exact origin. Native clients send no Origin, Authorization: Bearer <token>, and subprotocol gippity.v1.",
+			apps: "Custom and registered app files are static and public on the listener; keep secrets out of them. They are fully trusted owner code with the same authority as the bundled UI.",
+		},
 		webApp: options.customWebApp
 			? options.customWebAppPath
 				? { mode: "custom", path: options.customWebAppPath }
@@ -43,7 +53,13 @@ export function createLanRemoteDiscovery(options: {
 			connect: "GippityRemote.connect()",
 			methods: {
 				on: "remote.on(eventType, listener) returns an unsubscribe function; use '*' for every event",
-				call: "remote.call(target, method, ...args), where target is pi or context; method may be a dotted SDK path",
+				call: `remote.call(target, method, ...args); only these methods are allowed: ${Object.entries(
+					LAN_REMOTE_RPC_ALLOWLIST,
+				)
+					.flatMap(([target, methods]) =>
+						[...methods].map((method) => `${target}.${method}`),
+					)
+					.join(", ")}`,
 				setDraft:
 					"remote.setDraft(text) updates and synchronizes the shared draft",
 				flushDraft: "remote.flushDraft() waits for draft synchronization",
@@ -61,7 +77,8 @@ export function createLanRemoteDiscovery(options: {
 			events: {
 				method: "GET",
 				path: "/api/events?client=<clientId>",
-				format: "Server-Sent Events whose data is a JSON event object",
+				format:
+					"Server-Sent Events whose data is a JSON event object; read it with fetch and the Bearer header, because EventSource cannot send it",
 			},
 			rpc: {
 				method: "POST",
@@ -119,7 +136,7 @@ export function createLanRemoteDiscovery(options: {
 				"{ type: 'audio', mode, active, busy, muted, inputTooQuiet, state, detail } (browser client only)",
 		},
 		rpcNotes: [
-			"RPC forwards JSON-shaped arguments to the live Pi ExtensionAPI or ExtensionContext and returns the SDK result or error.",
+			"RPC forwards JSON-shaped arguments to an allowlisted method of the live Pi ExtensionAPI or ExtensionContext and returns the SDK result or error.",
 			"Available context methods depend on how the server was launched; Pi remains authoritative.",
 			"Callbacks, UI components, functions, and other non-JSON values cannot cross this transport.",
 		],

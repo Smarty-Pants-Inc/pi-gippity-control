@@ -38,8 +38,15 @@ export interface GippityControlConfig {
 		customWebApp: boolean;
 		customWebAppPath?: string | undefined;
 		port?: number | undefined;
+		/** Opt-in bind address: loopback or one Tailscale IP. Loopback when unset. */
+		host?: string | undefined;
 	};
 	voice: {
+		/**
+		 * Pi provider that carries realtime calls, such as a CLIProxyAPI gateway.
+		 * Unset uses the openai-codex login.
+		 */
+		provider?: string | undefined;
 		v3Voice: RealtimeV3Voice;
 		autoResumeRealtime: boolean;
 		refreshRealtimeAfterCompaction: boolean;
@@ -137,6 +144,8 @@ export function normalizeGippityControlConfig(
 	const voice = isObject(value["voice"]) ? value["voice"] : {};
 	const customWebAppPath = optionalString(lan["customWebAppPath"]);
 	const port = optionalPort(lan["port"]);
+	const host = optionalString(lan["host"]);
+	const provider = optionalString(voice["provider"]);
 	const inputDevice = optionalString(voice["inputDevice"]);
 	const outputDevice = optionalString(voice["outputDevice"]);
 	const contextModel = normalizeVoiceContextModel(voice["contextModel"]);
@@ -145,8 +154,10 @@ export function normalizeGippityControlConfig(
 			customWebApp: lan["customWebApp"] === true,
 			...(customWebAppPath ? { customWebAppPath } : {}),
 			...(port ? { port } : {}),
+			...(host ? { host } : {}),
 		},
 		voice: {
+			...(provider ? { provider } : {}),
 			v3Voice:
 				normalizeRealtimeV3Voice(voice["v3Voice"]) ??
 				DEFAULT_GIPPITY_CONTROL_CONFIG.voice.v3Voice,

@@ -1,6 +1,7 @@
 import { createReadStream } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { pipeline } from "node:stream/promises";
+import type { LanAccess } from "./access.ts";
 import type { LanVoiceActivity } from "./activity.ts";
 import { getLanVoiceAppAsset } from "./app-assets.ts";
 import type { LanVoiceBrowserClients } from "./browser-clients.ts";
@@ -16,6 +17,8 @@ import type {
 } from "./remote-app.ts";
 
 const MAX_REQUEST_BYTES = 300 * 1024;
+const UNAUTHORIZED =
+	"GipPity needs its access token. Open the URL that Pi shows when the server starts.";
 
 interface LanRemoteWebAppState {
 	customWebApp: boolean;
@@ -24,6 +27,7 @@ interface LanRemoteWebAppState {
 }
 
 export interface LanVoiceHttpHandlers {
+	access: LanAccess;
 	activity: LanVoiceActivity;
 	clients: LanVoiceBrowserClients;
 	draft: LanVoiceDraft;
@@ -50,6 +54,23 @@ export async function handleLanVoiceHttpRequest(
 		path = url.pathname;
 		let webApp: LanRemoteWebAppState | undefined;
 		const currentWebApp = () => (webApp ??= handlers.webApp());
+		response.setHeader("referrer-policy", "no-referrer");
+		if (!handlers.access.hostAllowed(request)) {
+			sendJson(response, 421, { error: "Unknown host" });
+			return;
+		}
+		if (!handlers.access.originAllowed(request, false)) {
+			sendJson(response, 403, { error: "Cross-origin request refused" });
+			return;
+		}
+		// Static shells (bundled page, client script, icons, owner-configured app
+		// files) hold no session data and load by navigation, which cannot carry
+		// the token. Every /api/ route, and discovery, needs the Bearer token.
+		const authorized = handlers.access.bearer(request);
+		if (path.startsWith("/api/") && !authorized) {
+			sendJson(response, 401, { error: UNAUTHORIZED });
+			return;
+		}
 		if (request.method === "GET" && path === LAN_REMOTE_CLIENT_PATH) {
 			sendText(
 				response,
@@ -81,7 +102,8 @@ export async function handleLanVoiceHttpRequest(
 			if (app.customWebApp) {
 				const asset = app.customApp?.asset(path);
 				if (asset) await sendFile(response, asset, false);
-				else sendJson(response, 200, app.discovery);
+				else if (authorized) sendJson(response, 200, app.discovery);
+				else sendJson(response, 401, { error: UNAUTHORIZED });
 				return;
 			}
 			sendText(
