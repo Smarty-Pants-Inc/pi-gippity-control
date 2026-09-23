@@ -61,6 +61,10 @@ Any browser that reaches the server can run Pi methods, so the server is locked 
 
 In the TUI, GipPity shows its state on the bottom border of the input box instead of the footer, so a call or the LAN server adds no rows. During a call, one fixed-width block (40 columns, at most 45% of the terminal) sits right-aligned: an activity wave, mute, then the tail of whoever is speaking (`you:` or `gip:`), or the call phase between turns. The block keeps its width as text grows, so nothing jitters. GipPity wraps whichever editor is active and restores it when the call and the LAN server end; Pi keeps the typed text across the swap. Without a TUI editor, the footer status is used as before.
 
+### Browser audio devices (Smarty fork)
+
+The hosted page has **Microphone** and **Speaker** pickers. It matches devices by label, so `Yealink BT51` finds `Yealink BT51 (Bluetooth)`. A choice made in the page is kept in that browser's `localStorage`. `lan.audio.inputDevice` and `lan.audio.outputDevice` set the default, for example `{"lan":{"audio":{"inputDevice":"Yealink BT51","outputDevice":"Yealink BT51"}}}`. The speaker choice applies to the call's audio output (`AudioContext.setSinkId`, Chrome), so the rest of the computer keeps its own output. If a device is missing, the page shows a warning and uses the system default; it switches back when the device reappears. Device names appear after microphone permission is granted. GipPity never changes system sound settings. `voice.inputDevice` and `voice.outputDevice` stay the native helper's devices on the Pi host.
+
 ### Realtime through a gateway (Smarty fork)
 
 Set `voice.provider` to a Pi provider, such as a CLIProxyAPI gateway, to send realtime calls to `<provider baseUrl>/realtime/calls` with that provider's key. The gateway owns the ChatGPT login and account, so Pi needs no `openai-codex` login. Dictation still requires the `openai-codex` login.

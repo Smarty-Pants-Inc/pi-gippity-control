@@ -1,6 +1,22 @@
 export const LAN_VOICE_BROWSER_AUDIO_SCRIPT = String.raw`
-function createAudioController({ button, muteButton, audioState, audioDetail, modeButtons, composer, client }) {
+function createAudioController({ button, muteButton, audioState, audioDetail, modeButtons, composer, client, inputSelect, outputSelect, deviceWarning }) {
   let selectedMode = 'conversation';
+
+  const fillDevices = (select, labels, chosen) => {
+    const options = [['', 'System default'], ...labels.map((label) => [label, label])];
+    if (chosen && !labels.includes(chosen)) options.push([chosen, labels.length ? chosen + ' (not connected)' : chosen]);
+    select.replaceChildren(...options.map(([value, text]) => { const option = document.createElement('option'); option.value = value; option.textContent = text; return option; }));
+    select.value = chosen;
+  };
+  const renderDevices = (devices) => {
+    fillDevices(inputSelect, devices.inputs, devices.input);
+    fillDevices(outputSelect, devices.outputs, devices.output);
+    deviceWarning.textContent = devices.warnings.join(' ');
+  };
+  client.on('devices', renderDevices);
+  renderDevices(client.devices.snapshot());
+  inputSelect.addEventListener('change', () => { void client.devices.select('input', inputSelect.value); });
+  outputSelect.addEventListener('change', () => { void client.devices.select('output', outputSelect.value); });
 
   const setStatus = (title, message = '') => { audioState.textContent = title; audioDetail.textContent = message; };
   const render = (audio) => {

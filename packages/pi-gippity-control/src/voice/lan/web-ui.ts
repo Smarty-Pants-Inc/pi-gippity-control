@@ -73,6 +73,11 @@ export function createLanVoiceWebUi(piTheme: Theme): string {
     @media (pointer:coarse) { .modes button { min-height:44px; } }
     @media (max-width:360px) { .app-header { gap:12px; } h1 { font-size:25px; } .modes { width:160px; } }
     @media (orientation:landscape) and (max-height:520px) and (min-width:600px) { main { width:min(100%,720px); grid-template-columns:280px 1fr; align-items:start; } .app-header { grid-column:1/-1; } .voice-control { grid-column:1; grid-row:2 / span 2; } .activity,.composer { grid-column:2; } #voice { width:112px; height:112px; } }
+    .devices { display:grid; gap:8px; width:100%; max-width:320px; }
+    .devices label { display:grid; gap:4px; color:var(--pi-muted); font-size:12px; }
+    .devices select { min-height:36px; border:1px solid var(--pi-border-muted); border-radius:8px; padding:6px 8px; color:var(--pi-text); background:var(--pi-tool-pending-bg); font:13px system-ui,sans-serif; }
+    #device-warning { margin:0; color:var(--pi-warning,var(--pi-accent)); font-size:12px; }
+    #device-warning:empty { display:none; }
     @keyframes spin { to { transform:rotate(360deg); } }
     @media (prefers-reduced-motion:reduce) { #voice { transition:none; } #voice[aria-busy="true"]::after { animation:none; border-color:var(--pi-accent); } }
   </style>
@@ -92,6 +97,11 @@ export function createLanVoiceWebUi(piTheme: Theme): string {
       </button>
       <button id="mute" type="button" aria-pressed="false" aria-label="Mute microphone" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v7a3 3 0 0 0 3 3Zm-1-10a1 1 0 1 1 2 0v7a1 1 0 1 1-2 0V5Zm7 6a1 1 0 0 1 1 1 7 7 0 0 1-6 6.93V21h3a1 1 0 1 1 0 2H8a1 1 0 1 1 0-2h3v-2.07A7 7 0 0 1 5 12a1 1 0 1 1 2 0 5 5 0 0 0 10 0 1 1 0 0 1 1-1Z"/></svg><span>Mute mic</span></button>
       <div class="audio-status" aria-live="polite"><p id="audio-state">Tap to start voice</p><p id="audio-detail"></p></div>
+      <div class="devices">
+        <label>Microphone<select id="input-device"><option value="">System default</option></select></label>
+        <label>Speaker<select id="output-device"><option value="">System default</option></select></label>
+        <p id="device-warning" role="alert"></p>
+      </div>
     </section>
     <section id="activity" class="activity" aria-live="polite" hidden>
       <div class="activity-header"><span class="activity-label">Pi</span><span id="activity-state"></span></div>

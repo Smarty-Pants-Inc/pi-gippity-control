@@ -40,6 +40,8 @@ export interface GippityControlConfig {
 		port?: number | undefined;
 		/** Opt-in bind address: loopback or one Tailscale IP. Loopback when unset. */
 		host?: string | undefined;
+		/** Browser audio devices for the hosted page, matched by label. */
+		audio?: { inputDevice?: string; outputDevice?: string } | undefined;
 	};
 	voice: {
 		/**
@@ -145,6 +147,9 @@ export function normalizeGippityControlConfig(
 	const customWebAppPath = optionalString(lan["customWebAppPath"]);
 	const port = optionalPort(lan["port"]);
 	const host = optionalString(lan["host"]);
+	const lanAudio = isObject(lan["audio"]) ? lan["audio"] : {};
+	const browserInput = optionalString(lanAudio["inputDevice"]);
+	const browserOutput = optionalString(lanAudio["outputDevice"]);
 	const provider = optionalString(voice["provider"]);
 	const inputDevice = optionalString(voice["inputDevice"]);
 	const outputDevice = optionalString(voice["outputDevice"]);
@@ -155,6 +160,14 @@ export function normalizeGippityControlConfig(
 			...(customWebAppPath ? { customWebAppPath } : {}),
 			...(port ? { port } : {}),
 			...(host ? { host } : {}),
+			...(browserInput || browserOutput
+				? {
+						audio: {
+							...(browserInput ? { inputDevice: browserInput } : {}),
+							...(browserOutput ? { outputDevice: browserOutput } : {}),
+						},
+					}
+				: {}),
 		},
 		voice: {
 			...(provider ? { provider } : {}),

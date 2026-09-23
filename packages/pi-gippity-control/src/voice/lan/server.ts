@@ -261,6 +261,7 @@ export async function startCodexLanVoiceServer(options: {
 				clients,
 				draft,
 				inputMuted: () => options.voice.inputMuted,
+				audioDefaults: () => ({ ...options.getConfig().lan.audio }),
 				remoteAppSnapshot: () => options.remoteApps.snapshot(),
 				remoteAppRoute: (path) => options.remoteApps.route(path),
 				renderManifest: () => createLanVoiceWebManifest(options.ctx.ui.theme),

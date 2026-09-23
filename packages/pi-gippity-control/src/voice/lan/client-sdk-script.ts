@@ -1,3 +1,4 @@
+import { LAN_AUDIO_DEVICES_SCRIPT } from "./audio-devices-script.ts";
 import { LAN_VOICE_AUDIO_WORKLET } from "./audio-worklet.ts";
 import { LAN_VOICE_MICROPHONE_BUFFER_WORKLET } from "./microphone-buffer-worklet.ts";
 
@@ -30,6 +31,7 @@ export const LAN_REMOTE_CLIENT_SCRIPT = String.raw`
     fetch(path, { method:'POST', keepalive, headers:authHeaders({'content-type':'application/json'}), body:JSON.stringify(body) });
   const audioWorkletSource = ${AUDIO_WORKLET_SOURCE};
   const microphoneWorkletSource = ${MICROPHONE_WORKLET_SOURCE};
+  ${LAN_AUDIO_DEVICES_SCRIPT}
 
   function id() {
     return global.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2) + Date.now().toString(36);
@@ -98,6 +100,7 @@ export const LAN_REMOTE_CLIENT_SCRIPT = String.raw`
       const currentRealtime = realtimeAudio; realtimeAudio = undefined;
       if (currentRealtime) currentRealtime.close();
       else { processor?.disconnect(); source?.disconnect(); void context?.close().catch(() => {}); }
+      if (context) client.devices.detach(context);
       processor = undefined; source = undefined; context = undefined;
       stream?.getTracks().forEach((track) => track.stop()); stream = undefined;
     };
@@ -180,13 +183,24 @@ export const LAN_REMOTE_CLIENT_SCRIPT = String.raw`
       try {
         if (!global.isSecureContext || !navigator.mediaDevices?.getUserMedia) throw new Error('Microphone access needs HTTPS and certificate acceptance.');
         if (!global.AudioWorkletNode) throw new Error('This browser does not support the required low-latency audio runtime.');
-        stream = await navigator.mediaDevices.getUserMedia({ audio:{ channelCount:1, echoCancellation:true, noiseSuppression:true, autoGainControl:true } });
+        const microphone = { channelCount:1, echoCancellation:true, noiseSuppression:true, autoGainControl:true };
+        await client.devices.refresh();
+        stream = await navigator.mediaDevices.getUserMedia({ audio:client.devices.inputConstraints(microphone) });
+        // Device labels appear only after permission; reopen if the chosen microphone was not open.
+        await client.devices.refresh();
         if (currentGeneration !== generation) { closeHardware(); return; }
+        if (client.devices.needsReopen(stream)) {
+          stream.getTracks().forEach((track) => track.stop());
+          stream = await navigator.mediaDevices.getUserMedia({ audio:client.devices.inputConstraints(microphone) });
+          if (currentGeneration !== generation) { closeHardware(); return; }
+        }
         if (mode === 'conversation') {
           realtimeAudio = await createRealtimeAudio(stream);
           context = realtimeAudio.context; processor = realtimeAudio.processor;
+          await client.devices.attach(context);
         } else {
           context = new AudioContext({ latencyHint:'interactive' });
+          await client.devices.attach(context);
           const workletUrl = URL.createObjectURL(new Blob([audioWorkletSource], { type:'text/javascript' }));
           try { await context.audioWorklet.addModule(workletUrl); }
           finally { URL.revokeObjectURL(workletUrl); }
@@ -314,6 +328,7 @@ export const LAN_REMOTE_CLIENT_SCRIPT = String.raw`
         client.audio._close(); closed = true; resolveInitialDraft();
         void postJson('/api/draft', { clientId, text:draft.text, revision:draft.revision }, true).catch(() => {});
 		global.removeEventListener('pagehide', pagehide);
+        global.navigator?.mediaDevices?.removeEventListener?.('devicechange', devicechange);
         events?.abort(); listeners.clear();
       },
     };
@@ -356,11 +371,20 @@ export const LAN_REMOTE_CLIENT_SCRIPT = String.raw`
 	  resolveInitialDraft();
       emit('draft', { ...draft });
     };
+    client.devices = createAudioDevices({
+      mediaDevices:global.navigator?.mediaDevices,
+      storage:(() => { try { return global.localStorage; } catch { return undefined; } })(),
+      onChange:(value) => emit('devices', value),
+    });
+    const devicechange = () => { void client.devices.refresh(); };
+    global.navigator?.mediaDevices?.addEventListener?.('devicechange', devicechange);
+    void client.devices.refresh();
     client.audio = createAudio(client, assertOpen);
     const receiveEvent = (data) => {
       try {
         const command = JSON.parse(data);
         client.audio._serverCommand(command);
+        if (command.type === 'audio.defaults') client.devices.setDefaults(command);
         if (command.type === 'draft') applyDraft(command);
         else emit(command.type, command);
 		if (command.type === 'pi.event') emit('pi:' + command.event, command.data, false);
