@@ -40,6 +40,11 @@ export interface GippityControlConfig {
 		port?: number | undefined;
 		/** Opt-in bind address: loopback or one Tailscale IP. Loopback when unset. */
 		host?: string | undefined;
+		/**
+		 * Opener for the page, run without a shell after the server starts. It
+		 * gets the page URL on stdin, for example ["ssh", "mac", "open-voice"].
+		 */
+		openCommand?: string[] | undefined;
 		/** Browser audio devices for the hosted page, matched by label. */
 		audio?: { inputDevice?: string; outputDevice?: string } | undefined;
 	};
@@ -103,6 +108,18 @@ function optionalString(value: unknown): string | undefined {
 		: undefined;
 }
 
+function openCommandValue(value: unknown): string[] | undefined {
+	if (!Array.isArray(value) || value.length === 0 || value.length > 16)
+		return undefined;
+	const argv = value.filter(
+		(part): part is string =>
+			typeof part === "string" &&
+			part.length > 0 &&
+			Buffer.byteLength(part) <= 1024,
+	);
+	return argv.length === value.length ? argv : undefined;
+}
+
 function optionalPort(value: unknown): number | undefined {
 	return typeof value === "number" &&
 		Number.isInteger(value) &&
@@ -147,6 +164,7 @@ export function normalizeGippityControlConfig(
 	const customWebAppPath = optionalString(lan["customWebAppPath"]);
 	const port = optionalPort(lan["port"]);
 	const host = optionalString(lan["host"]);
+	const openCommand = openCommandValue(lan["openCommand"]);
 	const lanAudio = isObject(lan["audio"]) ? lan["audio"] : {};
 	const browserInput = optionalString(lanAudio["inputDevice"]);
 	const browserOutput = optionalString(lanAudio["outputDevice"]);
@@ -160,6 +178,7 @@ export function normalizeGippityControlConfig(
 			...(customWebAppPath ? { customWebAppPath } : {}),
 			...(port ? { port } : {}),
 			...(host ? { host } : {}),
+			...(openCommand ? { openCommand } : {}),
 			...(browserInput || browserOutput
 				? {
 						audio: {
