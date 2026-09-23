@@ -77,12 +77,34 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libasound2-dev pkg-config
       - uses: dtolnay/rust-toolchain@stable
       - name: Build pi-codex-voice from source
+        env:
+          # Always build the bundled libopus and link it statically, so the
+          # helper never needs a system libopus (dev1 has none).
+          LIBOPUS_NO_PKG: "1"
+          LIBOPUS_STATIC: "1"
+          # The bundled libopus CMakeLists predates CMake 4's 3.5 minimum.
+          CMAKE_POLICY_VERSION_MINIMUM: "3.5"
         run: cargo build --release --locked --manifest-path "$PACKAGE_DIR/src/voice/rust/Cargo.toml"
       - name: Stage and smoke-test the helper
         run: |
           out="dist/${{ matrix.target }}"
           mkdir -p "$out"
           cp "$PACKAGE_DIR/src/voice/rust/target/release/pi-codex-voice" "$out/"
+          # Only system libraries that dev1 and macOS always have may be linked.
+          if [ "$RUNNER_OS" = Linux ]; then
+            libs=$(readelf -d "$out/pi-codex-voice" | grep NEEDED)
+            unexpected='lib(asound\.so\.2|gcc_s\.so\.1|m\.so\.6|c\.so\.6)'
+          else
+            libs=$(otool -L "$out/pi-codex-voice" | tail -n +2)
+            unexpected='^$'
+          fi
+          echo "$libs"
+          if [ "$RUNNER_OS" = Linux ] && echo "$libs" | grep -vqE "$unexpected"; then
+            echo "::error::The helper links a library that dev1 may not have."; exit 1
+          fi
+          if echo "$libs" | grep -qiE 'opus|/opt/homebrew|/usr/local'; then
+            echo "::error::The helper links a non-system opus or Homebrew library."; exit 1
+          fi
           # The helper announces its protocol before it reads stdin; no audio device is needed.
           "$out/pi-codex-voice" </dev/null | head -n 1 | tee /dev/stderr | grep -q '"ready"'
           (cd "$out" && shasum -a 256 pi-codex-voice > pi-codex-voice.sha256 && cat pi-codex-voice.sha256)
