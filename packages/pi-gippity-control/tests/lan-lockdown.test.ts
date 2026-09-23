@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { request } from "node:https";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -7,6 +7,7 @@ import { connect } from "node:tls";
 import { normalizeGippityControlConfig } from "../src/config.ts";
 import { resolveCodexVoiceAuth } from "../src/voice/auth.ts";
 import { resolveLanBindHost } from "../src/voice/lan/access.ts";
+import { lanRemoteCreatePrompt } from "../src/voice/lan/create.ts";
 import {
 	type CodexLanVoiceServer,
 	startCodexLanVoiceServer,
@@ -42,13 +43,15 @@ describe("LAN bind policy", () => {
 });
 
 describe("LAN server lockdown", () => {
-	test("listens on loopback by default and prints a token URL", async () => {
+	test("listens on loopback and puts the token only in the URL fragment", async () => {
 		const { server } = await startTestServer();
 		try {
 			expect(server.address.address).toBe("127.0.0.1");
 			const url = new URL(server.urls[0] ?? "");
-			expect(url.hostname).toBe("localhost");
-			expect(url.searchParams.get("token")?.length).toBeGreaterThanOrEqual(43);
+			expect(url.origin).toBe(`https://localhost:${server.address.port}`);
+			expect(url.pathname).toBe("/");
+			expect(url.search).toBe("");
+			expect(tokenOf(server).length).toBeGreaterThanOrEqual(43);
 		} finally {
 			await server.close();
 		}
@@ -59,85 +62,186 @@ describe("LAN server lockdown", () => {
 			await expect(startTestServer({ host })).rejects.toThrow(/will not bind/);
 	});
 
-	test("rejects every API route without the token", async () => {
+	test("rejects every API route without the Bearer token", async () => {
 		const { server, calls } = await startTestServer();
 		try {
 			const port = server.address.port;
-			expect((await send(port, "GET", "/")).status).toBe(401);
-			expect((await send(port, "GET", "/api/discovery")).status).toBe(401);
-			expect((await send(port, "GET", "/_gippity/client.js")).status).toBe(401);
-			expect((await send(port, "GET", "/api/events?client=a")).status).toBe(
-				401,
-			);
-			const rpc = await send(port, "POST", "/api/rpc", {
-				body: { clientId: "a", target: "pi", method: "exec", args: ["id"] },
-			});
-			expect(rpc.status).toBe(401);
-			const wrong = await send(port, "POST", "/api/rpc", {
-				body: { clientId: "a", target: "pi", method: "exec", args: ["id"] },
-				headers: {
-					authorization: "Bearer wrong",
-					cookie: `gippity_${port}=wrong`,
-				},
-			});
-			expect(wrong.status).toBe(401);
+			const token = tokenOf(server);
+			const rpc = { clientId: "a", target: "pi", method: "getThinkingLevel" };
+			for (const [method, path, body] of [
+				["GET", "/api/discovery", undefined],
+				["GET", "/api/events?client=a", undefined],
+				["POST", "/api/rpc", rpc],
+				["POST", "/api/stop", { clientId: "a" }],
+				["POST", "/api/draft", { clientId: "a", text: "x", revision: 0 }],
+				["POST", "/api/send", { clientId: "a", text: "x", revision: 0 }],
+			] as const) {
+				expect((await send(port, method, path, { body })).status).toBe(401);
+				const wrong = await send(port, method, path, {
+					body,
+					headers: { authorization: "Bearer wrong" },
+				});
+				expect(wrong.status).toBe(401);
+				// The old query and cookie forms are not accepted.
+				const legacy = await send(
+					port,
+					method,
+					`${path}${path.includes("?") ? "&" : "?"}token=${token}`,
+					{
+						body,
+						headers: { cookie: `gippity_${port}=${token}` },
+					},
+				);
+				expect(legacy.status).toBe(401);
+			}
 			expect(calls).toEqual([]);
-			expect(await upgradeStatus(port, "")).toBe(401);
 		} finally {
 			await server.close();
 		}
 	});
 
-	test("swaps the URL token for a strict cookie and then serves the API", async () => {
+	test("serves the API with the Bearer token and never sets a cookie", async () => {
 		const { server, calls } = await startTestServer();
 		try {
 			const port = server.address.port;
-			const token =
-				new URL(server.urls[0] ?? "").searchParams.get("token") ?? "";
-			const entry = await send(port, "GET", `/?token=${token}`);
-			expect(entry.status).toBe(303);
-			expect(entry.headers.location).toBe("/");
-			const cookie = String(entry.headers["set-cookie"]);
-			expect(cookie).toContain(`gippity_${port}=${token}`);
-			expect(cookie).toContain("HttpOnly");
-			expect(cookie).toContain("Secure");
-			expect(cookie).toContain("SameSite=Strict");
-			const cookieHeader = { cookie: `other=1; gippity_${port}=${token}` };
-			expect(
-				(await send(port, "GET", "/api/discovery", { headers: cookieHeader }))
-					.status,
-			).toBe(200);
-			expect(
-				(
-					await send(port, "GET", "/api/discovery", {
-						headers: { authorization: `Bearer ${token}` },
-					})
-				).status,
-			).toBe(200);
-			expect(
-				(
-					await send(
-						port,
-						"GET",
-						new URL(server.discoveryUrl).pathname +
-							new URL(server.discoveryUrl).search,
-					)
-				).status,
-			).toBe(200);
+			const auth = { authorization: `Bearer ${tokenOf(server)}` };
+			const discovery = await send(port, "GET", "/api/discovery", {
+				headers: auth,
+			});
+			expect(discovery.status).toBe(200);
+			expect(discovery.headers["set-cookie"]).toBeUndefined();
+			expect(discovery.headers["referrer-policy"]).toBe("no-referrer");
 			const rpc = await send(port, "POST", "/api/rpc", {
-				body: {
-					clientId: "a",
-					target: "pi",
-					method: "getThinkingLevel",
-					args: [],
-				},
-				headers: cookieHeader,
+				body: { clientId: "a", target: "pi", method: "getThinkingLevel" },
+				headers: auth,
 			});
 			expect(rpc.status).toBe(200);
 			expect(calls).toEqual(["getThinkingLevel"]);
-			expect(await upgradeStatus(port, cookieHeader.cookie)).toBe(101);
+			const script = await send(port, "GET", "/_gippity/client.js");
+			expect(script.status).toBe(200);
+			expect(script.headers["set-cookie"]).toBeUndefined();
+			expect(script.headers["referrer-policy"]).toBe("no-referrer");
 		} finally {
 			await server.close();
+		}
+	});
+
+	test("rejects foreign Host and cross-origin requests even with the token", async () => {
+		const { server, calls } = await startTestServer();
+		try {
+			const port = server.address.port;
+			const auth = { authorization: `Bearer ${tokenOf(server)}` };
+			const body = { clientId: "a", target: "pi", method: "getThinkingLevel" };
+			for (const host of [`evil.example:${port}`, `localhost:${port + 1}`]) {
+				const response = await send(port, "POST", "/api/rpc", {
+					body,
+					headers: { ...auth, host },
+				});
+				expect(response.status).toBe(421);
+			}
+			for (const origin of [
+				`https://localhost:${port + 1}`,
+				`http://localhost:${port}`,
+				"https://evil.example",
+				"null",
+			]) {
+				const response = await send(port, "POST", "/api/rpc", {
+					body,
+					headers: { ...auth, origin },
+				});
+				expect(response.status).toBe(403);
+			}
+			expect(calls).toEqual([]);
+			for (const authority of [`localhost:${port}`, `127.0.0.1:${port}`]) {
+				const response = await send(port, "POST", "/api/rpc", {
+					body,
+					headers: { ...auth, host: authority, origin: `https://${authority}` },
+				});
+				expect(response.status).toBe(200);
+			}
+		} finally {
+			await server.close();
+		}
+	});
+
+	test("audio WebSocket needs the exact origin and the token", async () => {
+		const { server } = await startTestServer();
+		try {
+			const port = server.address.port;
+			const token = tokenOf(server);
+			const browser = (origin: string, protocols: string) => ({
+				origin,
+				"sec-websocket-protocol": protocols,
+			});
+			const good = `gippity.v1, gippity.token.${token}`;
+			const accepted = await upgrade(
+				port,
+				browser(`https://localhost:${port}`, good),
+			);
+			expect(accepted.status).toBe(101);
+			expect(accepted.head).toMatch(/sec-websocket-protocol: gippity\.v1\r\n/i);
+			expect(accepted.head).not.toContain(token);
+			for (const headers of [
+				{},
+				browser(`https://localhost:${port}`, "gippity.v1"),
+				browser(`https://localhost:${port}`, "gippity.v1, gippity.token.wrong"),
+				// Same site, different port: a page on another localhost service.
+				browser(`https://localhost:${port + 1}`, good),
+				browser("null", good),
+				browser("https://evil.example", good),
+				// A page cannot set Authorization; a browser Origin needs the subprotocol.
+				{
+					origin: `https://localhost:${port}`,
+					authorization: `Bearer ${token}`,
+				},
+				{
+					...browser(`https://localhost:${port}`, good),
+					host: `evil.example:${port}`,
+				},
+			])
+				expect((await upgrade(port, headers)).status).toBe(401);
+			// Native clients (no Origin) authenticate with a Bearer header.
+			const native = await upgrade(port, {
+				authorization: `Bearer ${token}`,
+				"sec-websocket-protocol": "gippity.v1",
+			});
+			expect(native.status).toBe(101);
+			expect(
+				(await upgrade(port, { authorization: "Bearer wrong" })).status,
+			).toBe(401);
+		} finally {
+			await server.close();
+		}
+	});
+
+	test("custom app files are static; the discovery fallback needs the token", async () => {
+		const appDir = mkdtempSync(join(agentDir, "app-"));
+		const withIndex = await startTestServer(
+			{ customWebApp: true, customWebAppPath: appDir },
+			() => writeFileSync(join(appDir, "index.html"), "<p>app</p>"),
+		);
+		try {
+			const port = withIndex.server.address.port;
+			const page = await send(port, "GET", "/");
+			expect(page.status).toBe(200);
+			expect(page.headers["referrer-policy"]).toBe("no-referrer");
+		} finally {
+			await withIndex.server.close();
+		}
+		rmSync(join(appDir, "index.html"));
+		const fallback = await startTestServer({
+			customWebApp: true,
+			customWebAppPath: appDir,
+		});
+		try {
+			const port = fallback.server.address.port;
+			expect((await send(port, "GET", "/")).status).toBe(401);
+			const authorized = await send(port, "GET", "/", {
+				headers: { authorization: `Bearer ${tokenOf(fallback.server)}` },
+			});
+			expect(authorized.status).toBe(200);
+		} finally {
+			await fallback.server.close();
 		}
 	});
 
@@ -145,16 +249,33 @@ describe("LAN server lockdown", () => {
 		const first = await startTestServer();
 		const second = await startTestServer();
 		try {
-			const token = (server: CodexLanVoiceServer) =>
-				new URL(server.urls[0] ?? "").searchParams.get("token");
-			expect(token(first.server)).not.toBe(token(second.server));
-			const port = second.server.address.port;
-			const stale = await send(port, "GET", "/api/discovery", {
-				headers: { authorization: `Bearer ${token(first.server)}` },
-			});
+			expect(tokenOf(first.server)).not.toBe(tokenOf(second.server));
+			const stale = await send(
+				second.server.address.port,
+				"GET",
+				"/api/discovery",
+				{ headers: { authorization: `Bearer ${tokenOf(first.server)}` } },
+			);
 			expect(stale.status).toBe(401);
 		} finally {
 			await Promise.all([first.server.close(), second.server.close()]);
+		}
+	});
+
+	test("the create prompt carries discovery data but never the token", async () => {
+		const { server } = await startTestServer();
+		try {
+			const prompt = lanRemoteCreatePrompt({
+				appDirectory: agentDir,
+				configPath: join(agentDir, "pi-gippity-control.json"),
+				discovery: server.discovery(),
+			});
+			expect(prompt).toContain('"protocolVersion"');
+			expect(prompt).not.toContain(tokenOf(server));
+			expect(prompt).not.toContain(String(server.address.port));
+			expect(prompt).not.toMatch(/curl|-k\b/);
+		} finally {
+			await server.close();
 		}
 	});
 });
@@ -164,16 +285,14 @@ describe("remote RPC allowlist", () => {
 		const { server, calls } = await startTestServer();
 		try {
 			const port = server.address.port;
-			const token = new URL(server.urls[0] ?? "").searchParams.get("token");
-			const call = async (target: string, method: string) => {
-				const response = await sendJson(port, "/api/rpc", token ?? "", {
-					clientId: "a",
-					target,
-					method,
-					args: ["id"],
-				});
-				return response;
-			};
+			const auth = { authorization: `Bearer ${tokenOf(server)}` };
+			const call = async (target: string, method: string) =>
+				(
+					await send(port, "POST", "/api/rpc", {
+						body: { clientId: "a", target, method, args: ["id"] },
+						headers: auth,
+					})
+				).json;
 			for (const [target, method] of [
 				["pi", "exec"],
 				["pi", "sendUserMessage"],
@@ -183,8 +302,11 @@ describe("remote RPC allowlist", () => {
 				["context", "modelRegistry.getProviderAuth"],
 				["context", "sessionManager.getSessionFile"],
 			] as const) {
-				const response = await call(target, method);
-				expect(response).toMatchObject({ ok: false });
+				const response = (await call(target, method)) as {
+					ok?: boolean;
+					error?: { message?: string };
+				};
+				expect(response.ok).toBe(false);
 				expect(String(response.error?.message)).toContain("not allowed");
 			}
 			expect(calls).toEqual([]);
@@ -245,10 +367,16 @@ describe("realtime auth through a gateway provider", () => {
 	});
 });
 
-async function startTestServer(lan: Record<string, unknown> = {}): Promise<{
-	server: CodexLanVoiceServer;
-	calls: string[];
-}> {
+function tokenOf(server: CodexLanVoiceServer): string {
+	const fragment = new URL(server.urls[0] ?? "").hash.slice(1);
+	return new URLSearchParams(fragment).get("token") ?? "";
+}
+
+async function startTestServer(
+	lan: Record<string, unknown> = {},
+	beforeStart?: () => void,
+): Promise<{ server: CodexLanVoiceServer; calls: string[] }> {
+	beforeStart?.();
 	const calls: string[] = [];
 	const pi = {
 		getThinkingLevel: () => {
@@ -257,6 +385,9 @@ async function startTestServer(lan: Record<string, unknown> = {}): Promise<{
 		},
 		exec: () => {
 			calls.push("exec");
+		},
+		sendUserMessage: () => {
+			calls.push("sendUserMessage");
 		},
 	};
 	const server = await startCodexLanVoiceServer({
@@ -293,7 +424,11 @@ function send(
 	method: string,
 	path: string,
 	options: { body?: unknown; headers?: Record<string, string> } = {},
-): Promise<{ status: number; headers: Record<string, unknown> }> {
+): Promise<{
+	status: number;
+	headers: Record<string, unknown>;
+	json: unknown;
+}> {
 	return new Promise((resolve, reject) => {
 		const body =
 			options.body === undefined ? undefined : JSON.stringify(options.body);
@@ -305,17 +440,32 @@ function send(
 				path,
 				rejectUnauthorized: false,
 				headers: {
+					host: `localhost:${port}`,
 					...(body ? { "content-type": "application/json" } : {}),
 					...options.headers,
 				},
 			},
 			(response) => {
-				response.resume();
-				response.destroy();
-				resolve({
-					status: response.statusCode ?? 0,
-					headers: response.headers,
+				const isStream = String(response.headers["content-type"]).includes(
+					"event-stream",
+				);
+				const done = (text: string) =>
+					resolve({
+						status: response.statusCode ?? 0,
+						headers: response.headers,
+						json: parseJson(text),
+					});
+				if (isStream) {
+					response.destroy();
+					done("");
+					return;
+				}
+				let text = "";
+				response.setEncoding("utf8");
+				response.on("data", (chunk: string) => {
+					text += chunk;
 				});
+				response.on("end", () => done(text));
 			},
 		);
 		req.on("error", reject);
@@ -323,20 +473,34 @@ function send(
 	});
 }
 
-function upgradeStatus(port: number, cookie: string): Promise<number> {
+function parseJson(text: string): unknown {
+	try {
+		return JSON.parse(text);
+	} catch {
+		return undefined;
+	}
+}
+
+function upgrade(
+	port: number,
+	headers: Record<string, string>,
+): Promise<{ status: number; head: string }> {
 	return new Promise((resolve, reject) => {
+		const all: Record<string, string> = {
+			host: `localhost:${port}`,
+			connection: "Upgrade",
+			upgrade: "websocket",
+			"sec-websocket-version": "13",
+			"sec-websocket-key": "dGhlIHNhbXBsZSBub25jZQ==",
+			...headers,
+		};
 		const socket = connect(
 			{ host: "127.0.0.1", port, rejectUnauthorized: false },
 			() => {
 				socket.write(
 					[
 						"GET /api/audio?client=a HTTP/1.1",
-						`Host: localhost:${port}`,
-						"Connection: Upgrade",
-						"Upgrade: websocket",
-						"Sec-WebSocket-Version: 13",
-						"Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==",
-						...(cookie ? [`Cookie: ${cookie}`] : []),
+						...Object.entries(all).map(([name, value]) => `${name}: ${value}`),
 						"",
 						"",
 					].join("\r\n"),
@@ -347,46 +511,16 @@ function upgradeStatus(port: number, cookie: string): Promise<number> {
 		socket.setEncoding("utf8");
 		socket.on("data", (chunk: string) => {
 			head += chunk;
+			const end = head.indexOf("\r\n\r\n");
+			if (end < 0) return;
 			const match = /^HTTP\/1\.1 (\d{3})/.exec(head);
-			if (match) {
-				resolve(Number(match[1]));
-				socket.destroy();
-			}
+			resolve({
+				status: Number(match?.[1] ?? 0),
+				head: head.slice(0, end + 2),
+			});
+			socket.destroy();
 		});
 		socket.on("error", reject);
-		socket.on("close", () => resolve(0));
-	});
-}
-
-function sendJson(
-	port: number,
-	path: string,
-	token: string,
-	body: unknown,
-): Promise<{ ok?: boolean; result?: unknown; error?: { message?: string } }> {
-	return new Promise((resolve, reject) => {
-		const req = request(
-			{
-				host: "127.0.0.1",
-				port,
-				method: "POST",
-				path,
-				rejectUnauthorized: false,
-				headers: {
-					"content-type": "application/json",
-					authorization: `Bearer ${token}`,
-				},
-			},
-			(response) => {
-				let text = "";
-				response.setEncoding("utf8");
-				response.on("data", (chunk: string) => {
-					text += chunk;
-				});
-				response.on("end", () => resolve(JSON.parse(text)));
-			},
-		);
-		req.on("error", reject);
-		req.end(JSON.stringify(body));
+		socket.on("close", () => resolve({ status: 0, head }));
 	});
 }

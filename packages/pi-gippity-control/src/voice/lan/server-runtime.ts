@@ -1,6 +1,6 @@
 import type { Server as HttpsServer } from "node:https";
 import { isIPv6 } from "node:net";
-import { isLoopbackHost, LAN_ACCESS_QUERY } from "./access.ts";
+import { isLoopbackHost, LAN_ACCESS_FRAGMENT } from "./access.ts";
 
 export async function collectFailures(
 	promises: ReadonlyArray<Promise<unknown> | undefined>,
@@ -48,12 +48,7 @@ export function lanVoiceOrigin(host: string, port: number): string {
 	return `https://${isIPv6(host) ? `[${host}]` : host}:${port}`;
 }
 
-export function lanVoiceAccessUrl(
-	origin: string,
-	path: string,
-	token: string,
-): string {
-	const url = new URL(path, origin);
-	url.searchParams.set(LAN_ACCESS_QUERY, token);
-	return url.toString();
+/** The token rides in the fragment, which browsers never send to a server. */
+export function lanVoiceAccessUrl(origin: string, token: string): string {
+	return `${origin}/#${LAN_ACCESS_FRAGMENT}=${token}`;
 }

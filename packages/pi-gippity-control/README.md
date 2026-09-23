@@ -49,8 +49,11 @@ The LAN server includes a microphone mute button. The host retains the Realtime 
 Any browser that reaches the server can run Pi methods, so the server is locked down:
 
 - It binds `127.0.0.1` by default. To use it from another machine, forward the port over SSH: `ssh -L 43120:127.0.0.1:43120 <host>`, then open the URL that Pi shows.
-- Each server start creates a random access token. The URL that Pi shows carries it as `?token=`. The page swaps the token for an `HttpOnly`, `Secure`, `SameSite=Strict` cookie. Every page, API, event stream and audio socket needs the token, the cookie, or `Authorization: Bearer <token>`. Only the web manifest and the bundled icons are public.
-- The server is HTTPS only, including through the tunnel (`https://localhost:<port>`), so the `Secure` cookie works in Chrome and Safari after the certificate is accepted.
+- Each server start creates a random access token. The URL that Pi shows carries it in the fragment (`#token=`), which browsers never send to a server. The page keeps it in `sessionStorage` for its own origin and removes it from the address bar. Treat terminal scrollback that shows the URL as a credential.
+- Every `/api/` route needs `Authorization: Bearer <token>`. The event stream is read with `fetch`, and the audio WebSocket carries the token as a subprotocol from the exact page origin. No cookie is used, because browsers send cookies to every port on `localhost`.
+- Every request must name this server in `Host`, and a present `Origin` must be this server. When you forward with `ssh -L`, use the same local port as the server port.
+- The bundled page, the client script, icons and custom or registered app files are static and public on the listener. Custom and registered apps are fully trusted owner code with the same authority as the bundled UI; keep secrets out of their files.
+- The server is HTTPS only, including through the tunnel (`https://localhost:<port>`). Responses send `Referrer-Policy: no-referrer`.
 - Remote apps can call only an allowlist of RPC methods (`LAN_REMOTE_RPC_ALLOWLIST` in `src/voice/lan/rpc.ts`). `exec`, `sendUserMessage`, provider and tool changes, `shutdown` and every dotted SDK path are refused. The bundled UI uses no RPC.
 - `lan.host` is an explicit opt-in for one other bind address. It accepts only loopback or a Tailscale address (`100.64.0.0/10`, `fd7a:115c:a1e0::/48`). Wildcard (`0.0.0.0`, `::`) and LAN addresses are refused.
 

@@ -1,8 +1,12 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import type { IncomingMessage } from "node:http";
-import { BlockList, isIP } from "node:net";
+import { BlockList, isIP, isIPv6 } from "node:net";
 
-export const LAN_ACCESS_QUERY = "token";
+/** URL fragment key; browsers never send fragments to the server. */
+export const LAN_ACCESS_FRAGMENT = "token";
+/** Audio WebSocket subprotocol; the token travels in a second subprotocol. */
+export const LAN_AUDIO_SUBPROTOCOL = "gippity.v1";
+const TOKEN_SUBPROTOCOL_PREFIX = "gippity.token.";
 export const DEFAULT_LAN_BIND_HOST = "127.0.0.1";
 
 const loopback = new BlockList();
@@ -35,34 +39,66 @@ export function isLoopbackHost(host: string): boolean {
 	return family !== 0 && loopback.check(host, family === 6 ? "ipv6" : "ipv4");
 }
 
-export type LanAccessGrant = "cookie" | "header" | "query";
-
-/** One random access token per server start. */
+/**
+ * Origin-bound access for one server start. The token is sent only as an
+ * `Authorization: Bearer` header or an audio WebSocket subprotocol, never as a
+ * cookie: cookies are shared by every port on a host, so any other localhost
+ * service would receive them.
+ */
 export class LanAccess {
 	readonly token = randomBytes(32).toString("base64url");
 	private readonly expected = Buffer.from(this.token);
+	private readonly hosts = new Set<string>();
+	private readonly origins = new Set<string>();
 
-	authorize(request: IncomingMessage, url: URL): LanAccessGrant | undefined {
-		if (this.matches(cookieValue(request, this.cookieName(request))))
-			return "cookie";
+	/** Allows only the authorities that reach this listener. */
+	bind(address: string, port: number): void {
+		const names = isLoopbackHost(address)
+			? ["localhost", "127.0.0.1", "[::1]"]
+			: [isIPv6(address) ? `[${address}]` : address];
+		for (const name of names) {
+			this.hosts.add(`${name}:${port}`);
+			this.origins.add(`https://${name}:${port}`);
+		}
+	}
+
+	/** Rejects foreign Host headers (DNS rebinding, wrong forwards). */
+	hostAllowed(request: IncomingMessage): boolean {
+		return this.hosts.has(request.headers.host ?? "");
+	}
+
+	/** A present Origin must be this server; `required` also rejects a missing one. */
+	originAllowed(request: IncomingMessage, required: boolean): boolean {
+		const origin = request.headers.origin;
+		if (origin === undefined) return !required;
+		return this.origins.has(origin);
+	}
+
+	bearer(request: IncomingMessage): boolean {
 		const authorization = request.headers.authorization;
-		if (
-			authorization?.startsWith("Bearer ") &&
+		return (
+			authorization?.startsWith("Bearer ") === true &&
 			this.matches(authorization.slice(7))
-		)
-			return "header";
-		if (this.matches(url.searchParams.get(LAN_ACCESS_QUERY) ?? undefined))
-			return "query";
-		return undefined;
+		);
 	}
 
-	/** Browsers share cookies across ports, so the name carries the port. */
-	cookieName(request: IncomingMessage): string {
-		return `gippity_${request.socket.localPort ?? 0}`;
-	}
-
-	setCookie(request: IncomingMessage): string {
-		return `${this.cookieName(request)}=${this.token}; Path=/; Secure; HttpOnly; SameSite=Strict`;
+	/**
+	 * Browser upgrades need this exact Origin plus the token subprotocol. A
+	 * native client (for example the Code gateway) sends no Origin and a Bearer
+	 * header; browsers always send Origin on WebSocket upgrades and cannot set
+	 * Authorization, so no page can take that path.
+	 */
+	upgrade(request: IncomingMessage): boolean {
+		if (!this.hostAllowed(request)) return false;
+		if (request.headers.origin === undefined) return this.bearer(request);
+		if (!this.originAllowed(request, true)) return false;
+		const protocols = (request.headers["sec-websocket-protocol"] ?? "")
+			.split(",")
+			.map((value) => value.trim());
+		const token = protocols
+			.find((value) => value.startsWith(TOKEN_SUBPROTOCOL_PREFIX))
+			?.slice(TOKEN_SUBPROTOCOL_PREFIX.length);
+		return protocols.includes(LAN_AUDIO_SUBPROTOCOL) && this.matches(token);
 	}
 
 	private matches(candidate: string | undefined): boolean {
@@ -73,16 +109,4 @@ export class LanAccess {
 			timingSafeEqual(actual, this.expected)
 		);
 	}
-}
-
-function cookieValue(
-	request: IncomingMessage,
-	name: string,
-): string | undefined {
-	for (const part of request.headers.cookie?.split(";") ?? []) {
-		const separator = part.indexOf("=");
-		if (separator > 0 && part.slice(0, separator).trim() === name)
-			return part.slice(separator + 1).trim();
-	}
-	return undefined;
 }

@@ -14,7 +14,7 @@ import type { CodexLanVoiceServer } from "./server.ts";
 export interface CodexLanVoiceServerStatus {
 	running: boolean;
 	urls: string[];
-	discoveryUrl?: string | undefined;
+	discovery?: unknown;
 }
 
 export class CodexLanVoiceServerController {
@@ -51,7 +51,7 @@ export class CodexLanVoiceServerController {
 		return {
 			running: Boolean(this.server),
 			urls: this.server?.urls ?? [],
-			discoveryUrl: this.server?.discoveryUrl,
+			discovery: this.server?.discovery(),
 		};
 	}
 
@@ -92,7 +92,7 @@ export class CodexLanVoiceServerController {
 				"info",
 			);
 			if (needsCustomApp) {
-				appendLanRemoteCreateNotice(this.pi, this.server.discoveryUrl);
+				appendLanRemoteCreateNotice(this.pi);
 			}
 			return this.status();
 		});
