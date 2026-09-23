@@ -33,7 +33,8 @@ export function runLanOpener(
 			clearTimeout(timer);
 			reject(error);
 		});
-		child.on("exit", (code, signal) => {
+		// "close" waits for stderr to drain, so the failure message is complete.
+		child.on("close", (code, signal) => {
 			clearTimeout(timer);
 			if (code === 0) resolve();
 			else
