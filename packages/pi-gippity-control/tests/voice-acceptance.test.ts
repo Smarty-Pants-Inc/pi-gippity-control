@@ -39,6 +39,31 @@ describe("request spoken across a pause", () => {
 	});
 });
 
+describe("delegation transcript dedupe", () => {
+	test("drops a final user turn that only repeats the input", () => {
+		const turns = new RealtimeVoiceTurnTracker();
+		turns.inputAdded("Hi.");
+		turns.userFinished("Hi.");
+		turns.assistantFinished("Hello.");
+		turns.inputAdded("  Run the\n tests  on dev2. ");
+		turns.userFinished("  Run the\n tests  on dev2. ");
+		const delegated = turns.delegated("Run the tests on dev2.", "d1");
+		expect(delegated?.turn.transcriptDelta).toBe(
+			"user: Hi.\nassistant: Hello.",
+		);
+	});
+
+	test("keeps a final user turn that adds to the input", () => {
+		const turns = new RealtimeVoiceTurnTracker();
+		turns.inputAdded("Run the tests on dev2 and then deploy");
+		turns.userFinished("Run the tests on dev2 and then deploy");
+		const delegated = turns.delegated("Run the tests on dev2.", "d1");
+		expect(delegated?.turn.transcriptDelta).toBe(
+			"user: Run the tests on dev2 and then deploy",
+		);
+	});
+});
+
 describe("questions asked while Pi is busy", () => {
 	test("every answer reaches voice in order", () => {
 		const sent = recordHandoff();

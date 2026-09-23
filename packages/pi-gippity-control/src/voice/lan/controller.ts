@@ -6,6 +6,7 @@ import type {
 import type { GippityControlConfig } from "../../config.ts";
 import { resolveCodexVoiceAuth } from "../auth.ts";
 import type { CodexVoiceController } from "../controller.ts";
+import type { VoiceEditorStatus } from "../editor-status.ts";
 import { boundedAssistantText } from "./activity.ts";
 import { appendLanRemoteCreateNotice } from "./create.ts";
 import type { GippityRemoteApps } from "./remote-app.ts";
@@ -28,6 +29,7 @@ export class CodexLanVoiceServerController {
 	private readonly agentDir: string;
 	private readonly remoteApps: GippityRemoteApps;
 	private server: CodexLanVoiceServer | undefined;
+	private readonly editorStatus: VoiceEditorStatus | undefined;
 	private pendingAssistantText: string | undefined;
 	private operation = Promise.resolve();
 
@@ -38,7 +40,9 @@ export class CodexLanVoiceServerController {
 		sendUserMessage: (text: string, ctx: ExtensionContext) => void,
 		agentDir: string,
 		remoteApps: GippityRemoteApps,
+		editorStatus?: VoiceEditorStatus,
 	) {
+		this.editorStatus = editorStatus;
 		this.pi = pi;
 		this.voice = voice;
 		this.getConfig = getConfig;
@@ -80,10 +84,11 @@ export class CodexLanVoiceServerController {
 				certificateAgentDir: this.agentDir,
 				remoteApps: this.remoteApps,
 			});
-			ctx.ui.setStatus(
-				"gippity-lan",
-				ctx.ui.theme.fg("accent", "GipPity LAN: on"),
-			);
+			if (!this.editorStatus?.setLan(ctx, true))
+				ctx.ui.setStatus(
+					"gippity-lan",
+					ctx.ui.theme.fg("accent", "GipPity LAN: on"),
+				);
 			const config = this.getConfig();
 			const needsCustomApp =
 				config.lan.customWebApp && !this.server.customWebAppReady;
@@ -139,6 +144,7 @@ export class CodexLanVoiceServerController {
 		this.server = undefined;
 		this.pendingAssistantText = undefined;
 		ctx?.ui.setStatus("gippity-lan", undefined);
+		this.editorStatus?.setLan(ctx, false);
 		await server?.close();
 	}
 

@@ -74,12 +74,24 @@ class RealtimeTranscriptBuffer {
 		return transcript;
 	}
 
-	takeHistoryBefore(currentUser: TranscriptEntry): string | undefined {
+	/**
+	 * Takes finalized entries up to and including the delegated user turn. That
+	 * turn is dropped only when the delegation input already contains it, so
+	 * words the model left out of the input still reach Pi.
+	 */
+	takeThrough(currentUser: TranscriptEntry, input: string): string | undefined {
 		const currentUserIndex = this.entries.indexOf(currentUser);
 		const history =
 			currentUserIndex < 0
 				? []
-				: this.entries.slice(0, currentUserIndex).filter(({ final }) => final);
+				: this.entries
+						.slice(0, currentUserIndex + 1)
+						.filter(({ final }) => final);
+		if (
+			history.at(-1) === currentUser &&
+			normalizeWhitespace(input).includes(normalizeWhitespace(currentUser.text))
+		)
+			history.pop();
 		const transcript = this.render(history);
 		this.reset();
 		return transcript || undefined;
@@ -244,7 +256,7 @@ export class RealtimeVoiceTurnTracker {
 		currentUser?: TranscriptEntry,
 	): RealtimeVoiceTurn {
 		const transcriptDelta = currentUser
-			? this.transcript.takeHistoryBefore(currentUser)
+			? this.transcript.takeThrough(currentUser, delegation.input)
 			: this.transcript.takeFinalized();
 		return {
 			input: delegation.input,
@@ -252,4 +264,8 @@ export class RealtimeVoiceTurnTracker {
 			delegationId: delegation.delegationId,
 		};
 	}
+}
+
+function normalizeWhitespace(text: string): string {
+	return text.trim().replace(/\s+/g, " ");
 }

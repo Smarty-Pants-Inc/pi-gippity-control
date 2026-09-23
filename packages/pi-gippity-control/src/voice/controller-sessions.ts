@@ -21,6 +21,11 @@ interface RealtimeSessionLifecycle
 	onTurn(turn: RealtimeVoiceTurn): void;
 	onUserTranscript(transcript: string): void;
 	onTranscriptTail(transcript: string): void;
+	onLiveTranscript?(
+		role: "user" | "assistant",
+		text: string,
+		final: boolean,
+	): void;
 }
 
 interface DictationSessionLifecycle
@@ -68,6 +73,9 @@ export async function startControllerConversation(options: {
 			onTurn: options.lifecycle.onTurn,
 			onUserTranscript: options.lifecycle.onUserTranscript,
 			onTranscriptTail: options.lifecycle.onTranscriptTail,
+			...(options.lifecycle.onLiveTranscript
+				? { onLiveTranscript: options.lifecycle.onLiveTranscript }
+				: {}),
 		},
 		realtimePeer,
 	);

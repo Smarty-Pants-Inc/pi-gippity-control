@@ -36,6 +36,12 @@ export interface CodexConversationCallbacks {
 	onTurn(turn: RealtimeVoiceTurn): void;
 	onUserTranscript(transcript: string): void;
 	onTranscriptTail(transcriptDelta: string): void;
+	/** Live transcript deltas (final: the whole turn) for on-screen display. */
+	onLiveTranscript?(
+		role: "user" | "assistant",
+		text: string,
+		final: boolean,
+	): void;
 }
 
 export class CodexRealtimeConversation {
@@ -198,6 +204,10 @@ export class CodexRealtimeConversation {
 		this.handoff.progress(content);
 	}
 
+	agentTurnStarted(): void {
+		this.handoff.beginStandalone();
+	}
+
 	agentResult(content: string): void {
 		this.handoff.result(content);
 	}
@@ -273,6 +283,7 @@ export class CodexRealtimeConversation {
 			if (input) {
 				this.playback.inputStarted(this.speakableResponsePending);
 				this.turnTracker.inputAdded(input);
+				this.callbacks.onLiveTranscript?.("user", input, false);
 			}
 			return;
 		}
@@ -283,6 +294,7 @@ export class CodexRealtimeConversation {
 			if (output) {
 				this.playback.outputAdded();
 				this.turnTracker.outputAdded(output);
+				this.callbacks.onLiveTranscript?.("assistant", output, false);
 			}
 			this.callbacks.onStatus("speaking");
 			return;
@@ -337,6 +349,7 @@ export class CodexRealtimeConversation {
 				this.speakableResponsePending,
 				Boolean(input),
 			);
+			if (input) this.callbacks.onLiveTranscript?.("user", input, true);
 			if (input && this.turnTracker.userFinished(input))
 				this.callbacks.onUserTranscript(input);
 			this.callbacks.onStatus("responding");
@@ -344,9 +357,10 @@ export class CodexRealtimeConversation {
 		}
 		if (record["role"] !== "assistant") return;
 		this.playback.outputFinished();
-		const completed = this.turnTracker.assistantFinished(
-			boundedAssistantTranscript(record["transcript"]),
-		);
+		const finalOutput = boundedAssistantTranscript(record["transcript"]);
+		if (finalOutput)
+			this.callbacks.onLiveTranscript?.("assistant", finalOutput, true);
+		const completed = this.turnTracker.assistantFinished(finalOutput);
 		this.speakableResponsePending = false;
 		this.callbacks.onStatus("listening");
 		if (completed) this.callbacks.onTurn(completed);
