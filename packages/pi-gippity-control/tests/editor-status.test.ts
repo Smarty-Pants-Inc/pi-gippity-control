@@ -179,3 +179,36 @@ function fakeContext(mode = "tui") {
 	};
 	return { ctx, current: () => factory };
 }
+
+describe("live transcript text", () => {
+	test("keeps the spaces between streamed deltas", () => {
+		const status = new VoiceEditorStatus();
+		const { ctx } = fakeContextForTranscript();
+		status.setCall(ctx as never, {
+			status: "speaking",
+			muted: false,
+			quiet: false,
+		});
+		for (const delta of ["Hey", " there!", " What's", " up?"])
+			status.transcript("assistant", delta, false);
+		expect(status.labels(200).bottom.trim()).toMatch(
+			/gip: Hey there! What's up\?$/,
+		);
+	});
+});
+
+function fakeContextForTranscript() {
+	let factory: unknown;
+	return {
+		ctx: {
+			mode: "tui",
+			ui: {
+				theme: { fg: (_name: string, text: string) => text },
+				getEditorComponent: () => factory,
+				setEditorComponent: (next: unknown) => {
+					factory = next;
+				},
+			},
+		},
+	};
+}

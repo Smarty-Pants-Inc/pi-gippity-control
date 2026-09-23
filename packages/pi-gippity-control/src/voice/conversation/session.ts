@@ -283,7 +283,12 @@ export class CodexRealtimeConversation {
 			if (input) {
 				this.playback.inputStarted(this.speakableResponsePending);
 				this.turnTracker.inputAdded(input);
-				this.callbacks.onLiveTranscript?.("user", input, false);
+				// The display gets the raw delta: trimming drops the spaces between deltas.
+				this.callbacks.onLiveTranscript?.(
+					"user",
+					rawDelta(event["item"]),
+					false,
+				);
 			}
 			return;
 		}
@@ -294,7 +299,11 @@ export class CodexRealtimeConversation {
 			if (output) {
 				this.playback.outputAdded();
 				this.turnTracker.outputAdded(output);
-				this.callbacks.onLiveTranscript?.("assistant", output, false);
+				this.callbacks.onLiveTranscript?.(
+					"assistant",
+					rawDelta(event["item"]),
+					false,
+				);
 			}
 			this.callbacks.onStatus("speaking");
 			return;
@@ -445,4 +454,9 @@ function terminalTransportError(message: string): boolean {
 		message.startsWith("realtime speaker stream ended:") ||
 		message.startsWith("realtime microphone stream failed:")
 	);
+}
+
+function rawDelta(item: unknown): string {
+	const text = transcriptItemText(item);
+	return typeof text === "string" ? text : "";
 }
