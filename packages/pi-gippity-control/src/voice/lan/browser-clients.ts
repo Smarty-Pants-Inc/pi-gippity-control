@@ -78,8 +78,15 @@ export class LanVoiceBrowserClients {
 		isBinary: boolean,
 	): void {
 		if (!this.connections.isCurrentAudio(clientId, socket)) return;
+		let input: ReturnType<typeof decodeLanVoiceBrowserInput>;
 		try {
-			const input = decodeLanVoiceBrowserInput(data, isBinary);
+			input = decodeLanVoiceBrowserInput(data, isBinary);
+		} catch {
+			socket.close(1003, "invalid message");
+			return;
+		}
+		// A failing handler is not a malformed message: report its real error.
+		try {
 			if (input.type === "audio") {
 				this.session.receiveAudio(clientId, socket, input.pcm);
 				return;
@@ -108,8 +115,8 @@ export class LanVoiceBrowserClients {
 					.cancelDictation(clientId)
 					.catch((error: unknown) => this.sendSocketError(socket, error));
 			}
-		} catch {
-			socket.close(1003, "invalid message");
+		} catch (error) {
+			this.sendSocketError(socket, error);
 		}
 	}
 

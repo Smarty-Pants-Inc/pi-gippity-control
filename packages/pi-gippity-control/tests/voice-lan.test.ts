@@ -112,6 +112,31 @@ describe("LAN conversation setup", () => {
 	});
 });
 
+describe("audio socket errors", () => {
+	test("a failing handler reports its error instead of 'invalid message'", async () => {
+		const clients = testBrowserClients({
+			async ensureConversation() {},
+			onConversationAudio() {
+				throw new Error("Codex voice helper is not running");
+			},
+		});
+		const socket = new TestWebSocket();
+		clients.connectAudio("page", socket.asWebSocket());
+		socket.receive({ type: "start", mode: "conversation" });
+		await settle();
+		socket.emit("message", Buffer.alloc(960), true);
+		await settle();
+		expect(socket.readyState).toBe(WebSocket.OPEN);
+		expect(
+			socket.sent.map((value) => JSON.parse(String(value))).at(-1),
+		).toEqual({
+			type: "error",
+			message: "Codex voice helper is not running",
+		});
+		await clients.close();
+	});
+});
+
 describe("terminating stop confirms the end", () => {
 	for (const outcome of ["resolve", "reject"] as const)
 		test(`waits for the conversation to end (${outcome})`, async () => {
@@ -237,6 +262,7 @@ function stopHandlers(clients: LanVoiceBrowserClients) {
 function testBrowserClients(overrides: {
 	ensureConversation(): Promise<void>;
 	onConversationActivity?(active: boolean): void | Promise<void>;
+	onConversationAudio?(pcm: Buffer): void;
 }): LanVoiceBrowserClients {
 	return new LanVoiceBrowserClients({
 		...overrides,
@@ -247,7 +273,7 @@ function testBrowserClients(overrides: {
 		onConversationMute: () => {},
 		conversationMuted: () => false,
 		onConversationInputTooQuiet: () => {},
-		onConversationAudio: () => {},
+		onConversationAudio: overrides.onConversationAudio ?? (() => {}),
 		onDictationAudio: () => {},
 	});
 }

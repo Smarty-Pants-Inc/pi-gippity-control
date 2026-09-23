@@ -135,8 +135,23 @@ export async function startCodexLanVoiceServer(options: {
 			clients.sendControl(clientId, { type: "error", message: error.message }),
 	});
 
+	// The voice call can end outside this server (for example /gippity stop),
+	// which does not run the plan's onInactive. Drop that stale conversation so
+	// the next start creates a new call instead of feeding a stopped helper.
+	const liveConversation = () => {
+		if (
+			activeConversation &&
+			!options.voice.isCurrentConversation(activeConversation.conversation)
+		) {
+			activeConversation = undefined;
+			realtimePlan = undefined;
+			clients.broadcastControl({ type: "stop", reason: "ended" });
+		}
+		return activeConversation;
+	};
+
 	const ensureConversation = async (): Promise<void> => {
-		if (activeConversation) return;
+		if (liveConversation()) return;
 		if (conversationStart) return conversationStart.promise;
 		if (realtimePlan) return;
 		const abort = new AbortController();
@@ -240,7 +255,7 @@ export async function startCodexLanVoiceServer(options: {
 			});
 		},
 		onConversationAudio(pcm) {
-			activeConversation?.peer.sendAudio(pcm);
+			liveConversation()?.peer.sendAudio(pcm);
 		},
 		onDictationAudio: (clientId, pcm) => dictation.append(clientId, pcm),
 	});

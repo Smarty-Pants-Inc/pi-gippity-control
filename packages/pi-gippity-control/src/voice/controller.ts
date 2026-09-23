@@ -177,6 +177,11 @@ export class CodexVoiceController {
 		return prepareRealtimeVoicePrompt(ctx);
 	}
 
+	/** False once the call ended by any path, such as /gippity stop. */
+	isCurrentConversation(session: CodexRealtimeConversation): boolean {
+		return this.currentSession() === session;
+	}
+
 	async stopConversation(
 		session: CodexRealtimeConversation,
 		options?: { announce?: boolean },
