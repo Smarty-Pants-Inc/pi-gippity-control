@@ -12,8 +12,10 @@ import { openGippitySettings } from "./settings.ts";
 import type { CodexVoiceControls } from "./voice/controls.ts";
 import type { CodexLanVoiceServerController } from "./voice/lan/controller.ts";
 import { startLanRemoteCreateTurn } from "./voice/lan/create.ts";
+import { runLanOpener } from "./voice/lan/opener.ts";
 
 const ACTIONS = [
+	"settings",
 	"realtime",
 	"mute",
 	"dictation",
@@ -56,6 +58,10 @@ export function registerGippityCommand(options: {
 			state.config = readGippityControlConfig();
 			const action = args.trim().toLowerCase();
 			if (!action) {
+				await openGippityPage(ctx, state.config, lanVoice);
+				return;
+			}
+			if (action === "settings") {
 				if (!ctx.hasUI) {
 					ctx.ui.notify(formatStatus(state.config, lanVoice), "info");
 					return;
@@ -70,7 +76,7 @@ export function registerGippityCommand(options: {
 			}
 			if (!ACTIONS.includes(action as (typeof ACTIONS)[number])) {
 				ctx.ui.notify(
-					"Usage: /gippity [realtime|mute|dictation|stop|server|create|setup]",
+					"Usage: /gippity [settings|realtime|mute|dictation|stop|server|create|setup]",
 					"warning",
 				);
 				return;
@@ -128,6 +134,52 @@ export function registerGippityCommand(options: {
 			}
 		},
 	});
+}
+
+/**
+ * One step to talk: start the control server if it is not running (a running
+ * server and its call are kept), then open the page with the configured
+ * opener. The page's voice button starts or joins the call. The URL is always
+ * shown as a fallback.
+ */
+export async function openGippityPage(
+	ctx: ExtensionContext,
+	config: GippityControlConfig,
+	lanVoice: Pick<CodexLanVoiceServerController, "status" | "setEnabled">,
+	open: typeof runLanOpener = runLanOpener,
+): Promise<void> {
+	const wasRunning = lanVoice.status().running;
+	let status: Awaited<ReturnType<typeof lanVoice.setEnabled>>;
+	try {
+		status = await lanVoice.setEnabled(true, ctx);
+	} catch (error) {
+		ctx.ui.notify(
+			`Could not start GipPity: ${error instanceof Error ? error.message : String(error)}`,
+			"error",
+		);
+		return;
+	}
+	const url = status.urls[0];
+	if (!url) return;
+	const opener = config.lan.openCommand;
+	if (opener) {
+		try {
+			await open(opener, url);
+			ctx.ui.notify(
+				"GipPity page opened. Press the voice button to talk.",
+				"info",
+			);
+			return;
+		} catch (error) {
+			ctx.ui.notify(
+				`Could not open the GipPity page (${error instanceof Error ? error.message : String(error)}). Open it yourself:\n${url}`,
+				"warning",
+			);
+			return;
+		}
+	}
+	// The first start already printed the URL.
+	if (wasRunning) ctx.ui.notify(`GipPity is running:\n${url}`, "info");
 }
 
 function formatStatus(

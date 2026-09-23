@@ -25,7 +25,8 @@ Do not install this alongside `@howaboua/pi-codex-conversion`; that package alre
 
 Commands:
 
-- `/gippity` — settings
+- `/gippity` — start the control server if needed and open its page; press the voice button to talk
+- `/gippity settings`
 - `/gippity realtime`
 - `/gippity mute`
 - `/gippity dictation`
@@ -65,6 +66,10 @@ In the TUI, GipPity shows its state on the bottom border of the input box instea
 
 The hosted page has **Microphone** and **Speaker** pickers. It matches devices by label, so `Yealink BT51` finds `Yealink BT51 (Bluetooth)`. A choice made in the page is kept in that browser's `localStorage`. `lan.audio.inputDevice` and `lan.audio.outputDevice` set the default, for example `{"lan":{"audio":{"inputDevice":"Yealink BT51","outputDevice":"Yealink BT51"}}}`. The speaker choice applies to the call's audio output (`AudioContext.setSinkId`, Chrome), so the rest of the computer keeps its own output. If a device is missing, the page shows a warning and uses the system default; it switches back when the device reappears. Device names appear after microphone permission is granted. GipPity never changes system sound settings. `voice.inputDevice` and `voice.outputDevice` stay the native helper's devices on the Pi host.
 
+### One step to talk (Smarty fork)
+
+Bare `/gippity` starts the control server if it is not running and opens the page. A second `/gippity` during a call keeps the server and the call, and only opens the page again. Set `lan.openCommand` to open the page on another computer, for example `["ssh", "mac", "~/.local/bin/open-voice", "43120"]`. The command runs without a shell. It receives the page URL as one line on **stdin**, never as an argument, because other accounts can read process arguments. The URL is always shown too, as a fallback. The call starts when you press the page's voice button; browsers need that click before they allow microphone audio.
+
 ### Realtime through a gateway (Smarty fork)
 
 Set `voice.provider` to a Pi provider, such as a CLIProxyAPI gateway, to send realtime calls to `<provider baseUrl>/realtime/calls` with that provider's key. The gateway owns the ChatGPT login and account, so Pi needs no `openai-codex` login. Dictation still requires the `openai-codex` login.
@@ -73,7 +78,7 @@ Set `voice.provider` to a Pi provider, such as a CLIProxyAPI gateway, to send re
 
 This fork does not ship prebuilt `pi-codex-voice` binaries. CI builds them from `src/voice/rust` as `pi-codex-voice-linux-x64` and `pi-codex-voice-darwin-arm64` artifacts. Install the artifact at `src/voice/bin/<platform>-<arch>/pi-codex-voice`, or run `npm run build:voice-helper` locally.
 
-The global realtime prompt lives at `<pi-agent-directory>/REALTIME-SYSTEM-PROMPT.md`; trusted projects can append `.pi/REALTIME-SYSTEM-PROMPT.md`. GipPity ships its current template and cumulative schema changelog as raw Markdown. It checks the marker only when realtime voice is engaged and tells you when to ask your agent to migrate an outdated customized prompt instead of rewriting it automatically. Both paths are shown in `/gippity`.
+The global realtime prompt lives at `<pi-agent-directory>/REALTIME-SYSTEM-PROMPT.md`; trusted projects can append `.pi/REALTIME-SYSTEM-PROMPT.md`. GipPity ships its current template and cumulative schema changelog as raw Markdown. It checks the marker only when realtime voice is engaged and tells you when to ask your agent to migrate an outdated customized prompt instead of rewriting it automatically. Both paths are shown in `/gippity settings`.
 
 Other Pi extensions can ask an active voice session to speak:
 
