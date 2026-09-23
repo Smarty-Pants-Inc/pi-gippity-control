@@ -20,6 +20,9 @@ const audio = createAudioController({
 	audioState:document.querySelector('#audio-state'),
 	audioDetail:document.querySelector('#audio-detail'),
 	modeButtons:[...document.querySelectorAll('.modes [data-mode]')],
+	inputSelect:document.querySelector('#input-device'),
+	outputSelect:document.querySelector('#output-device'),
+	deviceWarning:document.querySelector('#device-warning'),
 	composer,
 	client,
 });

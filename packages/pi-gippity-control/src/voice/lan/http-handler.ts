@@ -37,6 +37,7 @@ export interface LanVoiceHttpHandlers {
 	webApp(): LanRemoteWebAppState;
 	rpc(body: Record<string, unknown>): Promise<unknown>;
 	inputMuted(): boolean;
+	audioDefaults(): { inputDevice?: string; outputDevice?: string };
 	remoteAppSnapshot(): GippityRemoteAppMessage | undefined;
 	remoteAppRoute(path: string): GippityRemoteAppRoute;
 	ownerIsActive(): boolean;
@@ -173,6 +174,10 @@ export async function handleLanVoiceHttpRequest(
 			handlers.clients.sendControl(clientId, {
 				type: "mute",
 				muted: handlers.inputMuted(),
+			});
+			handlers.clients.sendControl(clientId, {
+				type: "audio.defaults",
+				...handlers.audioDefaults(),
 			});
 			const remoteApp = handlers.remoteAppSnapshot();
 			if (remoteApp) handlers.clients.sendControl(clientId, remoteApp);
