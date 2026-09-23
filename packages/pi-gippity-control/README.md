@@ -59,7 +59,7 @@ Any browser that reaches the server can run Pi methods, so the server is locked 
 
 ### Status in the input box (Smarty fork)
 
-In the TUI, GipPity shows its state on the editor border instead of the footer, so a call or the LAN server adds no rows. The top border shows the LAN indicator, an activity wave, the call phase and mute. The bottom border shows the rolling transcript of both sides. Labels are right-aligned and cut to fit narrow terminals. GipPity wraps whichever editor is active and restores it when the call and the LAN server end; Pi keeps the typed text across the swap. Without a TUI editor, the footer status is used as before.
+In the TUI, GipPity shows its state on the bottom border of the input box instead of the footer, so a call or the LAN server adds no rows. During a call, one fixed-width block (40 columns, at most 45% of the terminal) sits right-aligned: an activity wave, mute, then the tail of whoever is speaking (`you:` or `gip:`), or the call phase between turns. The block keeps its width as text grows, so nothing jitters. GipPity wraps whichever editor is active and restores it when the call and the LAN server end; Pi keeps the typed text across the swap. Without a TUI editor, the footer status is used as before.
 
 ### Realtime through a gateway (Smarty fork)
 

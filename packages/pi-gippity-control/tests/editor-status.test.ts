@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { Editor, visibleWidth } from "@earendil-works/pi-tui";
 import {
 	decorateEditorBorders,
+	liveStatusWidth,
 	VoiceEditorStatus,
 } from "../src/voice/editor-status.ts";
 
@@ -85,23 +86,50 @@ describe("voice status inside the editor border", () => {
 		expect(wrapped).not.toBe(previous);
 		status.transcript("user", "check the ", false);
 		status.transcript("user", "build", false);
-		status.transcript("assistant", "It is green.", true);
 		const editor = (
 			wrapped as (...args: unknown[]) => { render(w: number): string[] }
 		)(TUI, THEME, {});
-		const plain = editor
-			.render(80)
-			.map((line) => line.replace(/\x1b\[[0-9;]*m/g, ""));
-		expect(plain[0]).toMatch(/[▁-▇]{3} listening ─$/);
-		expect(plain.at(-1)).toContain("you: check the build  gip: It is green. ─");
+		const lines = editor.render(80);
+		const plain = lines.map((line) => line.replace(/\x1b\[[0-9;]*m/g, ""));
+		expect(lines).toHaveLength(realEditor().render(80).length);
+		// Only the bottom border carries the block; the top border is untouched.
+		expect(plain[0]).toMatch(/^─+$/);
+		expect(plain.at(-1)).toMatch(/[▁-▇]{3} you: check the build +─$/);
 		expect(status.setCall(ctx as never, undefined)).toBe(true);
 		expect(current()).toBe(previous);
+	});
+
+	test("one speaker at a time, in a fixed-width block that shows the tail", () => {
+		const { ctx } = fakeContext();
+		const status = new VoiceEditorStatus();
 		status.setCall(ctx as never, {
-			status: "listening",
-			muted: false,
+			status: "speaking",
+			muted: true,
 			quiet: false,
 		});
-		expect(status.labels().bottom).toBe("");
+		const width = (text: string) => visibleWidth(text);
+		const blocks: string[] = [];
+		expect(status.labels(80).bottom).toMatch(/^[▁-▇]{3} muted speaking +$/);
+		status.transcript("user", "what is the build state", true);
+		blocks.push(status.labels(80).bottom);
+		expect(blocks[0]).toContain("you: …t is the build state");
+		expect(blocks[0]).toMatch(/^[▁-▇]{3} muted you: /);
+		status.transcript("assistant", "It is green", false);
+		blocks.push(status.labels(80).bottom);
+		expect(blocks[1]).toContain("gip: It is green");
+		expect(blocks[1]).not.toContain("you:");
+		status.transcript(
+			"assistant",
+			`, and ${"all checks passed ".repeat(5)}on main`,
+			false,
+		);
+		blocks.push(status.labels(80).bottom);
+		expect(blocks[2]).toMatch(/ gip: ….*on main *$/);
+		// Fixed width: no jitter as text grows; 40 columns at 80, 45% when narrow.
+		for (const block of blocks) expect(width(block)).toBe(liveStatusWidth(80));
+		expect(liveStatusWidth(80)).toBe(36);
+		expect(liveStatusWidth(200)).toBe(40);
+		expect(width(status.labels(60).bottom)).toBe(27);
 	});
 
 	test("the LAN indicator keeps the border until both LAN and call end", () => {
@@ -110,15 +138,13 @@ describe("voice status inside the editor border", () => {
 		status.setLan(ctx as never, true);
 		const wrapped = current();
 		expect(wrapped).toBeDefined();
+		expect(status.labels(80).bottom).toBe("GipPity LAN");
 		status.setCall(ctx as never, {
 			status: "speaking",
 			muted: true,
 			quiet: false,
 		});
 		expect(current()).toBe(wrapped);
-		expect(status.labels().top).toMatch(
-			/^GipPity LAN · [▁-▇]{3} speaking · muted$/,
-		);
 		status.setCall(ctx as never, undefined);
 		expect(current()).toBe(wrapped);
 		status.setLan(ctx as never, false);

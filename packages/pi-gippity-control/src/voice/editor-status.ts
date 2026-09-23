@@ -19,10 +19,17 @@ export interface VoiceEditorLabels {
 }
 
 const MIN_BORDER_KEPT = 4;
+const LIVE_WIDTH = 40;
+const LIVE_SHARE = 0.45;
 const TRANSCRIPT_CHARS = 400;
 const WAVE_FRAMES = ["▁▃▅", "▂▅▇", "▃▇▅", "▅▇▃", "▇▅▂", "▅▃▁"];
 const ANIMATED = new Set(["listening", "speaking", "responding", "recording"]);
 const FRAME_MS = 160;
+
+/** The live status block width: fixed per terminal width, so it never jitters. */
+export function liveStatusWidth(width: number): number {
+	return Math.max(0, Math.min(LIVE_WIDTH, Math.floor(width * LIVE_SHARE)));
+}
 
 /**
  * Writes voice labels right-aligned over the editor's top and bottom border
@@ -110,6 +117,7 @@ export class VoiceEditorStatus {
 		user: { text: "", final: false },
 		assistant: { text: "", final: false },
 	};
+	private speaker: "user" | "assistant" | undefined;
 
 	/** Returns false when Pi has no TUI editor; callers then use the footer. */
 	setCall(
@@ -118,7 +126,10 @@ export class VoiceEditorStatus {
 	): boolean {
 		if (call && !this.supported(ctx)) return false;
 		this.call = call;
-		if (!call) for (const side of Object.values(this.sides)) side.text = "";
+		if (!call) {
+			for (const side of Object.values(this.sides)) side.text = "";
+			this.speaker = undefined;
+		}
 		this.sync(ctx);
 		return true;
 	}
@@ -136,38 +147,40 @@ export class VoiceEditorStatus {
 		else side.text = side.final ? text : side.text + text;
 		side.final = final;
 		side.text = side.text.slice(-TRANSCRIPT_CHARS);
+		if (!final || !this.speaker) this.speaker = role;
 		this.tui?.requestRender();
 	}
 
-	labels(): VoiceEditorLabels {
-		const top: string[] = [];
-		if (this.lan) top.push("GipPity LAN");
-		if (this.call) {
-			const { status, muted, quiet } = this.call;
-			const wave = ANIMATED.has(status)
-				? (WAVE_FRAMES[this.frame % WAVE_FRAMES.length] ?? "")
-				: "▁▁▁";
-			top.push(
-				[
-					`${wave} ${status}`,
-					muted ? "muted" : "",
-					quiet ? "mic too quiet" : "",
-				]
-					.filter(Boolean)
-					.join(" · "),
-			);
-		}
-		const said = (label: string, text: string) =>
-			text.trim() ? `${label}: ${text.trim().replace(/\s+/g, " ")}` : "";
-		const bottom = this.call
-			? [
-					said("you", this.sides.user.text),
-					said("gip", this.sides.assistant.text),
-				]
-					.filter(Boolean)
-					.join("  ")
+	/**
+	 * One fixed-width block on the bottom border: activity wave, phase and
+	 * mute, then the tail of whoever is speaking. Outside a call only the LAN
+	 * indicator shows.
+	 */
+	labels(width: number): VoiceEditorLabels {
+		if (!this.call) return { top: "", bottom: this.lan ? "GipPity LAN" : "" };
+		const size = liveStatusWidth(width);
+		const { status, muted, quiet } = this.call;
+		const wave = ANIMATED.has(status)
+			? (WAVE_FRAMES[this.frame % WAVE_FRAMES.length] ?? "")
+			: "▁▁▁";
+		// While someone speaks, the tag names them and the words fill the block;
+		// between turns the phase shows instead.
+		const head = `${wave}${muted ? " muted" : quiet ? " quiet" : ""}`;
+		const spoken = this.speaker
+			? this.sides[this.speaker].text.trim().replace(/\s+/g, " ")
 			: "";
-		return { top: top.join(" · "), bottom };
+		const tag = this.speaker === "user" ? "you: " : "gip: ";
+		const room = size - visibleWidth(head) - 1 - tag.length;
+		const words = spoken && room > 1 ? fit(spoken, room, true) : "";
+		const label = fit(
+			`${head} ${words ? `${tag}${words}` : status}`,
+			size,
+			false,
+		);
+		return {
+			top: "",
+			bottom: label + " ".repeat(Math.max(0, size - visibleWidth(label))),
+		};
 	}
 
 	private supported(ctx: ExtensionContext | undefined): boolean {
@@ -205,8 +218,11 @@ export class VoiceEditorStatus {
 				: new CustomEditor(tui, theme, keybindings);
 			const render = editor.render.bind(editor);
 			editor.render = (width: number) =>
-				decorateEditorBorders(render(width), width, this.labels(), (text) =>
-					ctx.ui.theme.fg("accent", text),
+				decorateEditorBorders(
+					render(width),
+					width,
+					this.labels(width),
+					(text) => ctx.ui.theme.fg("accent", text),
 				);
 			this.tui = tui;
 			return editor;
