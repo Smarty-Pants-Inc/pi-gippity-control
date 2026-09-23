@@ -50,6 +50,8 @@ Any browser that reaches the server can run Pi methods, so the server is locked 
 
 - It binds `127.0.0.1` by default. To use it from another machine, forward the port over SSH: `ssh -L 43120:127.0.0.1:43120 <host>`, then open the URL that Pi shows.
 - Each server start creates a random access token. The URL that Pi shows carries it as `?token=`. The page swaps the token for an `HttpOnly`, `Secure`, `SameSite=Strict` cookie. Every page, API, event stream and audio socket needs the token, the cookie, or `Authorization: Bearer <token>`. Only the web manifest and the bundled icons are public.
+- The server is HTTPS only, including through the tunnel (`https://localhost:<port>`), so the `Secure` cookie works in Chrome and Safari after the certificate is accepted.
+- Remote apps can call only an allowlist of RPC methods (`LAN_REMOTE_RPC_ALLOWLIST` in `src/voice/lan/rpc.ts`). `exec`, `sendUserMessage`, provider and tool changes, `shutdown` and every dotted SDK path are refused. The bundled UI uses no RPC.
 - `lan.host` is an explicit opt-in for one other bind address. It accepts only loopback or a Tailscale address (`100.64.0.0/10`, `fd7a:115c:a1e0::/48`). Wildcard (`0.0.0.0`, `::`) and LAN addresses are refused.
 
 ### Realtime through a gateway (Smarty fork)

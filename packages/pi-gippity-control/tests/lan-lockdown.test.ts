@@ -125,11 +125,16 @@ describe("LAN server lockdown", () => {
 				).status,
 			).toBe(200);
 			const rpc = await send(port, "POST", "/api/rpc", {
-				body: { clientId: "a", target: "pi", method: "probe", args: [] },
+				body: {
+					clientId: "a",
+					target: "pi",
+					method: "getThinkingLevel",
+					args: [],
+				},
 				headers: cookieHeader,
 			});
 			expect(rpc.status).toBe(200);
-			expect(calls).toEqual(["probe"]);
+			expect(calls).toEqual(["getThinkingLevel"]);
 			expect(await upgradeStatus(port, cookieHeader.cookie)).toBe(101);
 		} finally {
 			await server.close();
@@ -150,6 +155,45 @@ describe("LAN server lockdown", () => {
 			expect(stale.status).toBe(401);
 		} finally {
 			await Promise.all([first.server.close(), second.server.close()]);
+		}
+	});
+});
+
+describe("remote RPC allowlist", () => {
+	test("refuses exec, key readers and dotted paths even with the token", async () => {
+		const { server, calls } = await startTestServer();
+		try {
+			const port = server.address.port;
+			const token = new URL(server.urls[0] ?? "").searchParams.get("token");
+			const call = async (target: string, method: string) => {
+				const response = await sendJson(port, "/api/rpc", token ?? "", {
+					clientId: "a",
+					target,
+					method,
+					args: ["id"],
+				});
+				return response;
+			};
+			for (const [target, method] of [
+				["pi", "exec"],
+				["pi", "sendUserMessage"],
+				["pi", "setActiveTools"],
+				["pi", "registerProvider"],
+				["context", "shutdown"],
+				["context", "modelRegistry.getProviderAuth"],
+				["context", "sessionManager.getSessionFile"],
+			] as const) {
+				const response = await call(target, method);
+				expect(response).toMatchObject({ ok: false });
+				expect(String(response.error?.message)).toContain("not allowed");
+			}
+			expect(calls).toEqual([]);
+			expect(await call("pi", "getThinkingLevel")).toMatchObject({
+				ok: true,
+				result: "high",
+			});
+		} finally {
+			await server.close();
 		}
 	});
 });
@@ -206,12 +250,11 @@ async function startTestServer(lan: Record<string, unknown> = {}): Promise<{
 	calls: string[];
 }> {
 	const calls: string[] = [];
-	const probe = () => {
-		calls.push("probe");
-		return "ok";
-	};
 	const pi = {
-		probe,
+		getThinkingLevel: () => {
+			calls.push("getThinkingLevel");
+			return "high";
+		},
 		exec: () => {
 			calls.push("exec");
 		},
@@ -312,5 +355,38 @@ function upgradeStatus(port: number, cookie: string): Promise<number> {
 		});
 		socket.on("error", reject);
 		socket.on("close", () => resolve(0));
+	});
+}
+
+function sendJson(
+	port: number,
+	path: string,
+	token: string,
+	body: unknown,
+): Promise<{ ok?: boolean; result?: unknown; error?: { message?: string } }> {
+	return new Promise((resolve, reject) => {
+		const req = request(
+			{
+				host: "127.0.0.1",
+				port,
+				method: "POST",
+				path,
+				rejectUnauthorized: false,
+				headers: {
+					"content-type": "application/json",
+					authorization: `Bearer ${token}`,
+				},
+			},
+			(response) => {
+				let text = "";
+				response.setEncoding("utf8");
+				response.on("data", (chunk: string) => {
+					text += chunk;
+				});
+				response.on("end", () => resolve(JSON.parse(text)));
+			},
+		);
+		req.on("error", reject);
+		req.end(JSON.stringify(body));
 	});
 }

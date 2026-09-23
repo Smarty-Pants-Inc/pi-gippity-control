@@ -1,3 +1,5 @@
+import { LAN_REMOTE_RPC_ALLOWLIST } from "./rpc.ts";
+
 const LAN_REMOTE_PROTOCOL_VERSION = 1;
 export const LAN_REMOTE_CLIENT_PATH = "/_gippity/client.js";
 export const LAN_REMOTE_DISCOVERY_PATH = "/api/discovery";
@@ -43,7 +45,13 @@ export function createLanRemoteDiscovery(options: {
 			connect: "GippityRemote.connect()",
 			methods: {
 				on: "remote.on(eventType, listener) returns an unsubscribe function; use '*' for every event",
-				call: "remote.call(target, method, ...args), where target is pi or context; method may be a dotted SDK path",
+				call: `remote.call(target, method, ...args); only these methods are allowed: ${Object.entries(
+					LAN_REMOTE_RPC_ALLOWLIST,
+				)
+					.flatMap(([target, methods]) =>
+						[...methods].map((method) => `${target}.${method}`),
+					)
+					.join(", ")}`,
 				setDraft:
 					"remote.setDraft(text) updates and synchronizes the shared draft",
 				flushDraft: "remote.flushDraft() waits for draft synchronization",

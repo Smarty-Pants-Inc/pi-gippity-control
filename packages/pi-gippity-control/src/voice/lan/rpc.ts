@@ -4,6 +4,32 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { remoteJsonValue } from "./remote-json.ts";
 
+/**
+ * Remote apps may call only these methods. The bundled UI calls none of them.
+ * `pi.exec`, `sendUserMessage` (use /api/send), provider and tool changes,
+ * `shutdown` and every dotted path (for example
+ * `modelRegistry.getProviderAuth`, which returns API keys) stay unreachable.
+ */
+export const LAN_REMOTE_RPC_ALLOWLIST: Readonly<
+	Record<LanRemoteRpcRequest["target"], ReadonlySet<string>>
+> = {
+	pi: new Set([
+		"getSessionName",
+		"setSessionName",
+		"getThinkingLevel",
+		"setThinkingLevel",
+		"getActiveTools",
+		"getCommands",
+	]),
+	context: new Set([
+		"isIdle",
+		"hasPendingMessages",
+		"getContextUsage",
+		"abort",
+		"compact",
+	]),
+};
+
 export interface LanRemoteRpcRequest {
 	id?: string | number | null;
 	target: "pi" | "context";
@@ -32,6 +58,8 @@ export function decodeLanRemoteRpcRequest(
 		)
 	)
 		throw new Error("RPC method is invalid");
+	if (!LAN_REMOTE_RPC_ALLOWLIST[target].has(method))
+		throw new Error(`RPC method ${target}.${method} is not allowed`);
 	if (!Array.isArray(args)) throw new Error("RPC args must be an array");
 	const id = value["id"];
 	if (
