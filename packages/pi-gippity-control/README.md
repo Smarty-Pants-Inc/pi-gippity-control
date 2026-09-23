@@ -42,7 +42,23 @@ Set `lan.customWebApp: true` to enable a custom main UI, then set `lan.customWeb
 
 Companion extensions can register one built static app through `registerGippityRemoteApp`. GipPity serves it under `/_gippity/apps/<id>/` alongside the main remote UI, replays its bounded `app.state` snapshot on browser reconnect, and forwards transient `app.event` messages through the existing mini-SDK. The app still uses `GippityRemote` for activity, Pi events, prompts, drafts, voice, and reconnection; extensions must not start another server. While Pi waits on an extension prompt, activity enters `waiting` with the prompt title and the bundled UI shows **Waiting for you**.
 
-The LAN server includes a microphone mute button. The host retains the Realtime WebRTC call and relays 24 kHz mono audio to the active browser, so moving between devices does not restart the voice session. The server is unauthenticated by design for trusted networks, uses a local HTTPS certificate, belongs only to the Pi session that started it, and stops when that session changes.
+The LAN server includes a microphone mute button. The host retains the Realtime WebRTC call and relays 24 kHz mono audio to the active browser, so moving between devices does not restart the voice session. The server uses a local HTTPS certificate, belongs only to the Pi session that started it, and stops when that session changes.
+
+### Access and binding (Smarty fork)
+
+Any browser that reaches the server can run Pi methods, so the server is locked down:
+
+- It binds `127.0.0.1` by default. To use it from another machine, forward the port over SSH: `ssh -L 43120:127.0.0.1:43120 <host>`, then open the URL that Pi shows.
+- Each server start creates a random access token. The URL that Pi shows carries it as `?token=`. The page swaps the token for an `HttpOnly`, `Secure`, `SameSite=Strict` cookie. Every page, API, event stream and audio socket needs the token, the cookie, or `Authorization: Bearer <token>`. Only the web manifest and the bundled icons are public.
+- `lan.host` is an explicit opt-in for one other bind address. It accepts only loopback or a Tailscale address (`100.64.0.0/10`, `fd7a:115c:a1e0::/48`). Wildcard (`0.0.0.0`, `::`) and LAN addresses are refused.
+
+### Realtime through a gateway (Smarty fork)
+
+Set `voice.provider` to a Pi provider, such as a CLIProxyAPI gateway, to send realtime calls to `<provider baseUrl>/realtime/calls` with that provider's key. The gateway owns the ChatGPT login and account, so Pi needs no `openai-codex` login. Dictation still requires the `openai-codex` login.
+
+### Voice helper binary (Smarty fork)
+
+This fork does not ship prebuilt `pi-codex-voice` binaries. CI builds them from `src/voice/rust` as `pi-codex-voice-linux-x64` and `pi-codex-voice-darwin-arm64` artifacts. Install the artifact at `src/voice/bin/<platform>-<arch>/pi-codex-voice`, or run `npm run build:voice-helper` locally.
 
 The global realtime prompt lives at `<pi-agent-directory>/REALTIME-SYSTEM-PROMPT.md`; trusted projects can append `.pi/REALTIME-SYSTEM-PROMPT.md`. GipPity ships its current template and cumulative schema changelog as raw Markdown. It checks the marker only when realtime voice is engaged and tells you when to ask your agent to migrate an outdated customized prompt instead of rewriting it automatically. Both paths are shown in `/gippity`.
 

@@ -1,4 +1,6 @@
 import type { Server as HttpsServer } from "node:https";
+import { isIPv6 } from "node:net";
+import { isLoopbackHost, LAN_ACCESS_QUERY } from "./access.ts";
 
 export async function collectFailures(
 	promises: ReadonlyArray<Promise<unknown> | undefined>,
@@ -20,7 +22,11 @@ export function configureServer(server: HttpsServer): void {
 	server.on("error", () => {});
 }
 
-export function listen(server: HttpsServer, port: number): Promise<void> {
+export function listen(
+	server: HttpsServer,
+	port: number,
+	host: string,
+): Promise<void> {
 	return new Promise((resolve, reject) => {
 		const onError = (error: Error) => {
 			server.off("listening", onListening);
@@ -32,19 +38,22 @@ export function listen(server: HttpsServer, port: number): Promise<void> {
 		};
 		server.once("error", onError);
 		server.once("listening", onListening);
-		server.listen(port, "0.0.0.0");
+		server.listen(port, host);
 	});
 }
 
-export function lanVoiceUrls(
-	hostnames: string[],
-	ipAddresses: string[],
-	port: number,
-): string[] {
-	const hosts = [
-		...hostnames.filter((value) => value !== "localhost"),
-		...ipAddresses.filter((value) => value !== "127.0.0.1"),
-	];
-	if (hosts.length === 0) hosts.push("localhost");
-	return [...new Set(hosts.map((host) => `https://${host}:${port}`))];
+/** The origin a browser uses; loopback is reached as localhost through `ssh -L`. */
+export function lanVoiceOrigin(host: string, port: number): string {
+	if (isLoopbackHost(host)) return `https://localhost:${port}`;
+	return `https://${isIPv6(host) ? `[${host}]` : host}:${port}`;
+}
+
+export function lanVoiceAccessUrl(
+	origin: string,
+	path: string,
+	token: string,
+): string {
+	const url = new URL(path, origin);
+	url.searchParams.set(LAN_ACCESS_QUERY, token);
+	return url.toString();
 }

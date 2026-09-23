@@ -132,7 +132,7 @@ export async function startControllerMode(options: {
 	try {
 		const startup = await interruptible(
 			Promise.all([
-				resolveCodexVoiceAuth(options.ctx),
+				resolveCodexVoiceAuth(options.ctx, options.config.voice.provider),
 				options.mode === "realtime"
 					? options.preparedRealtimeContext
 						? Promise.resolve(options.preparedRealtimeContext)

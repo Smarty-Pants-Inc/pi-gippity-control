@@ -9,7 +9,10 @@ export interface CodexVoiceAuth {
 
 export async function resolveCodexVoiceAuth(
 	ctx: ExtensionContext,
+	provider?: string,
 ): Promise<CodexVoiceAuth> {
+	if (provider && provider !== "openai-codex")
+		return resolveGatewayVoiceAuth(ctx, provider);
 	const resolved = await ctx.modelRegistry.getProviderAuth("openai-codex");
 	const token = resolved?.auth.apiKey;
 	if (!token)
@@ -28,6 +31,41 @@ export async function resolveCodexVoiceAuth(
 		headers,
 		baseUrl,
 		officialCodex: isOfficialCodexBaseUrl(baseUrl),
+		...(resolved.env ? { env: resolved.env } : {}),
+	};
+}
+
+/**
+ * Routes realtime calls through a Pi provider such as a CLIProxyAPI gateway.
+ * The gateway owns the ChatGPT login and account selection, so no
+ * chatgpt-account-id is sent and Pi needs no openai-codex login.
+ */
+async function resolveGatewayVoiceAuth(
+	ctx: ExtensionContext,
+	provider: string,
+): Promise<CodexVoiceAuth> {
+	const resolved = await ctx.modelRegistry.getProviderAuth(provider);
+	const token = resolved?.auth.apiKey;
+	if (!token)
+		throw new Error(`Voice provider "${provider}" has no API key in Pi`);
+	const baseUrl =
+		resolved.auth.baseUrl ??
+		ctx.modelRegistry
+			.getAll()
+			.find((model) => model.provider === provider && model.baseUrl)?.baseUrl;
+	if (!baseUrl)
+		throw new Error(`Voice provider "${provider}" has no base URL in Pi`);
+	const headers = new Headers();
+	for (const [name, value] of Object.entries(resolved.auth.headers ?? {}))
+		if (value !== null) headers.set(name, value);
+	headers.set("authorization", `Bearer ${token}`);
+	headers.set("originator", "pi");
+	headers.set("x-session-id", ctx.sessionManager.getSessionId());
+	headers.set("user-agent", "pi-gippity-control");
+	return {
+		headers,
+		baseUrl,
+		officialCodex: false,
 		...(resolved.env ? { env: resolved.env } : {}),
 	};
 }

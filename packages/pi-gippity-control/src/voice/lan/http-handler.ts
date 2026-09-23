@@ -1,6 +1,7 @@
 import { createReadStream } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { pipeline } from "node:stream/promises";
+import { LAN_ACCESS_QUERY, type LanAccess } from "./access.ts";
 import type { LanVoiceActivity } from "./activity.ts";
 import { getLanVoiceAppAsset } from "./app-assets.ts";
 import type { LanVoiceBrowserClients } from "./browser-clients.ts";
@@ -24,6 +25,7 @@ interface LanRemoteWebAppState {
 }
 
 export interface LanVoiceHttpHandlers {
+	access: LanAccess;
 	activity: LanVoiceActivity;
 	clients: LanVoiceBrowserClients;
 	draft: LanVoiceDraft;
@@ -50,6 +52,34 @@ export async function handleLanVoiceHttpRequest(
 		path = url.pathname;
 		let webApp: LanRemoteWebAppState | undefined;
 		const currentWebApp = () => (webApp ??= handlers.webApp());
+		const grant = handlers.access.authorize(request, url);
+		if (!grant) {
+			// Only the install manifest and bundled icons are public; browsers
+			// fetch the manifest without cookies.
+			const publicAsset =
+				request.method === "GET" &&
+				(path === "/manifest.webmanifest" || getLanVoiceAppAsset(path));
+			if (!publicAsset || currentWebApp().customWebApp) {
+				sendJson(response, 401, {
+					error:
+						"GipPity needs its access token. Open the URL that Pi shows when the server starts.",
+				});
+				return;
+			}
+		} else if (grant === "query" && request.method === "GET") {
+			// Swap the URL token for a cookie so fetch, EventSource and WebSocket
+			// calls from the page authenticate without the token in the address bar.
+			response.setHeader("set-cookie", handlers.access.setCookie(request));
+			if (path === "/") {
+				url.searchParams.delete(LAN_ACCESS_QUERY);
+				response.writeHead(303, {
+					"cache-control": "no-store",
+					location: `${url.pathname}${url.search}`,
+				});
+				response.end();
+				return;
+			}
+		}
 		if (request.method === "GET" && path === LAN_REMOTE_CLIENT_PATH) {
 			sendText(
 				response,

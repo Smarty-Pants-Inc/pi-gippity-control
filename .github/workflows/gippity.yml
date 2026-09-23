@@ -1,0 +1,95 @@
+name: GipPity CI
+
+# This fork carries only @howaboua/pi-gippity-control. The upstream monorepo
+# workflows were removed: they publish, need upstream secrets, or require the
+# prebuilt helper binaries that this fork builds from source instead.
+
+on:
+  pull_request:
+  merge_group:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  PACKAGE_DIR: packages/pi-gippity-control
+
+jobs:
+  typecheck:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+      - run: bun install --frozen-lockfile --ignore-scripts
+      - run: bun run --cwd "$PACKAGE_DIR" typecheck
+
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+      - run: bun install --frozen-lockfile --ignore-scripts
+      - run: bun run --cwd "$PACKAGE_DIR" test
+
+  lint:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+      - run: bun install --frozen-lockfile --ignore-scripts
+      - run: bun run --cwd "$PACKAGE_DIR" lint
+      - name: No prebuilt helper binaries in git
+        run: |
+          if git ls-files "$PACKAGE_DIR/src/voice/bin" | grep -q .; then
+            echo "::error::Prebuilt helper binaries are tracked; CI builds them from source."
+            git ls-files "$PACKAGE_DIR/src/voice/bin"
+            exit 1
+          fi
+
+  helper:
+    name: helper (${{ matrix.target }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # ubuntu-24.04 matches dev1 (glibc 2.39, libasound.so.2).
+          - target: linux-x64
+            runner: ubuntu-24.04
+          - target: darwin-arm64
+            runner: macos-15
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install ALSA headers
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libasound2-dev pkg-config
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build pi-codex-voice from source
+        run: cargo build --release --locked --manifest-path "$PACKAGE_DIR/src/voice/rust/Cargo.toml"
+      - name: Stage and smoke-test the helper
+        run: |
+          out="dist/${{ matrix.target }}"
+          mkdir -p "$out"
+          cp "$PACKAGE_DIR/src/voice/rust/target/release/pi-codex-voice" "$out/"
+          # The helper announces its protocol before it reads stdin; no audio device is needed.
+          "$out/pi-codex-voice" </dev/null | head -n 1 | tee /dev/stderr | grep -q '"ready"'
+          (cd "$out" && shasum -a 256 pi-codex-voice > pi-codex-voice.sha256 && cat pi-codex-voice.sha256)
+          echo "${{ github.sha }}" > "$out/SOURCE_COMMIT"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pi-codex-voice-${{ matrix.target }}
+          path: dist/${{ matrix.target }}
+          if-no-files-found: error
+          retention-days: 30

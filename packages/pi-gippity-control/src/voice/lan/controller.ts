@@ -14,6 +14,7 @@ import type { CodexLanVoiceServer } from "./server.ts";
 export interface CodexLanVoiceServerStatus {
 	running: boolean;
 	urls: string[];
+	discoveryUrl?: string | undefined;
 }
 
 export class CodexLanVoiceServerController {
@@ -47,7 +48,11 @@ export class CodexLanVoiceServerController {
 	}
 
 	status(): CodexLanVoiceServerStatus {
-		return { running: Boolean(this.server), urls: this.server?.urls ?? [] };
+		return {
+			running: Boolean(this.server),
+			urls: this.server?.urls ?? [],
+			discoveryUrl: this.server?.discoveryUrl,
+		};
 	}
 
 	setEnabled(
@@ -68,7 +73,8 @@ export class CodexLanVoiceServerController {
 				pi: this.pi,
 				getConfig: this.getConfig,
 				voice: this.voice,
-				resolveAuth: () => resolveCodexVoiceAuth(ctx),
+				resolveAuth: () =>
+					resolveCodexVoiceAuth(ctx, this.getConfig().voice.provider),
 				sendUserMessage: (text) => this.sendUserMessage(text, ctx),
 				ownerSessionId: sessionId,
 				certificateAgentDir: this.agentDir,
@@ -82,14 +88,11 @@ export class CodexLanVoiceServerController {
 			const needsCustomApp =
 				config.lan.customWebApp && !this.server.customWebAppReady;
 			ctx.ui.notify(
-				`GipPity control server is running:\n${this.server.urls.join("\n")}\nAccept the local certificate on first visit.${needsCustomApp ? "\nNo custom web app is connected. Run /gippity create." : ""}`,
+				`GipPity control server is running:\n${this.server.urls.join("\n")}\nThe URL carries a private access token. Accept the local certificate on first visit.${needsCustomApp ? "\nNo custom web app is connected. Run /gippity create." : ""}`,
 				"info",
 			);
 			if (needsCustomApp) {
-				appendLanRemoteCreateNotice(
-					this.pi,
-					`${this.server.urls[0]}/api/discovery`,
-				);
+				appendLanRemoteCreateNotice(this.pi, this.server.discoveryUrl);
 			}
 			return this.status();
 		});
