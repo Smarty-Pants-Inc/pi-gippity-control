@@ -21,13 +21,17 @@ function fakeVoice() {
 		events,
 		stops: 0,
 		sendData: undefined as ((message: unknown) => void) | undefined,
+		running: false,
+		/** What /gippity stop does: the controller ends the call and closes its peer. */
+		stopOutside: async () => {},
 	};
 	const voice = {
 		inputMuted: false,
 		onInputMuteChange: () => () => {},
 		setInputMuted: () => true,
 		setConversationInputActive() {},
-		isCurrentConversation: () => true,
+		isCurrentConversation: () => state.running,
+		ownsPeerPlan: () => state.running,
 		async startRealtimeWithPeerPlan(
 			_ctx: unknown,
 			config: unknown,
@@ -43,6 +47,11 @@ function fakeVoice() {
 			peer.applyAnswer("v=0 answer-from-openai");
 			await ready.promise;
 			state.sendData = (message) => peer.sendData(message);
+			state.running = true;
+			state.stopOutside = async () => {
+				state.running = false;
+				await peer.close();
+			};
 			plan.onActive?.({} as never, peer);
 			return true;
 		},
@@ -183,8 +192,32 @@ describe("browser-direct call media", () => {
 			});
 			other.socket.close();
 
-			// The media lives in the page: closing it ends the call.
+			// /gippity stop ends the call outside the server: the page is told.
+			await state.stopOutside();
+			expect(await page.next("rtc.close")).toEqual({ type: "rtc.close" });
+			expect(await page.next("stop")).toEqual({
+				type: "stop",
+				reason: "ended",
+			});
+
+			// The page closes its socket on stop; a new tap opens a new one.
 			page.socket.close();
+			await pause();
+			const again = openPage(server, "page");
+			await again.opened;
+			again.send({ type: "start", mode: "conversation" });
+			await again.next("rtc.offer.request");
+			again.send({ type: "rtc.offer", sdp: "v=0 second-offer" });
+			await again.next("rtc.answer");
+			again.send({ type: "rtc.state", state: "ready" });
+			await again.next("active");
+			expect(state.offers).toEqual([
+				"v=0 offer-from-browser",
+				"v=0 second-offer",
+			]);
+
+			// The media lives in the page: closing it ends the call.
+			again.socket.close();
 			await pause();
 			await pause();
 			expect(state.stops).toBe(1);
@@ -192,7 +225,6 @@ describe("browser-direct call media", () => {
 			await server.close();
 		}
 	});
-
 	test("the page learns the media mode; relay stays available", async () => {
 		const direct = normalizeGippityControlConfig({});
 		expect(direct.lan.media).toBeUndefined();

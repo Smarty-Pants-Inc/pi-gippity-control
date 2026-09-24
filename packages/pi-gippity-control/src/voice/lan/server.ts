@@ -145,13 +145,18 @@ export async function startCodexLanVoiceServer(options: {
 	// which does not run the plan's onInactive. Drop that stale conversation so
 	// the next start creates a new call instead of feeding a stopped helper.
 	const liveConversation = () => {
+		// A dropped call that is resuming keeps its plan; only a call that ended
+		// for good is stale.
 		if (
 			activeConversation &&
-			!options.voice.isCurrentConversation(activeConversation.conversation)
+			!options.voice.isCurrentConversation(activeConversation.conversation) &&
+			!(realtimePlan && options.voice.ownsPeerPlan(realtimePlan))
 		) {
 			activeConversation = undefined;
 			realtimePlan = undefined;
-			clients.broadcastControl({ type: "stop", reason: "ended" });
+			const ended = { type: "stop", reason: "ended" };
+			clients.sendConversationControl(ended);
+			clients.broadcastControl(ended);
 		}
 		return activeConversation;
 	};
@@ -175,6 +180,9 @@ export async function startCodexLanVoiceServer(options: {
 					const direct = new BrowserDirectRealtimePeer({
 						send: (message) => clients.sendConversationControl(message),
 						onSpeakerSuppressed,
+						// No audio reaches the host in this mode, so check for an ended
+						// call when its peer closes.
+						onClosed: () => setTimeout(() => liveConversation(), 0),
 					});
 					directPeer = direct;
 					peer = direct;

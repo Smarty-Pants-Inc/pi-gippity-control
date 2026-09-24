@@ -17,6 +17,7 @@ export class BrowserDirectRealtimePeer implements CodexRealtimeWebRtcPeer {
 	readonly kind = "webrtc" as const;
 	private readonly send: (message: unknown) => boolean;
 	private readonly onSpeakerSuppressed: (suppressed: boolean) => void;
+	private readonly onClosed: (() => void) | undefined;
 	private readonly listeners = new Set<
 		(event: CodexRealtimePeerEvent) => void
 	>();
@@ -28,7 +29,9 @@ export class BrowserDirectRealtimePeer implements CodexRealtimeWebRtcPeer {
 	constructor(options: {
 		send(message: unknown): boolean;
 		onSpeakerSuppressed(suppressed: boolean): void;
+		onClosed?(): void;
 	}) {
+		this.onClosed = options.onClosed;
 		this.send = options.send;
 		this.onSpeakerSuppressed = options.onSpeakerSuppressed;
 	}
@@ -108,6 +111,7 @@ export class BrowserDirectRealtimePeer implements CodexRealtimeWebRtcPeer {
 		this.closed = true;
 		this.offer?.reject(new Error("The call was closed"));
 		this.send({ type: "rtc.close" });
+		this.onClosed?.();
 	}
 
 	private require(message: unknown): void {

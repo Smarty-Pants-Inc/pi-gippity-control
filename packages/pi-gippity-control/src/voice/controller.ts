@@ -177,6 +177,11 @@ export class CodexVoiceController {
 		return prepareRealtimeVoicePrompt(ctx);
 	}
 
+	/** True while this plan's call is running or resuming after a drop. */
+	ownsPeerPlan(plan: RealtimePeerPlan): boolean {
+		return this.runtime.realtimePeerPlan === plan;
+	}
+
 	/** False once the call ended by any path, such as /gippity stop. */
 	isCurrentConversation(session: CodexRealtimeConversation): boolean {
 		return this.currentSession() === session;
