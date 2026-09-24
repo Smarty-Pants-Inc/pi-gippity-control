@@ -25,8 +25,14 @@ const TRANSCRIPT_CHARS = 400;
 const LEVELS = "▁▂▃▄▅▆▇";
 /** About 12 fps: smooth, and cheap for the TUI. */
 const FRAME_MS = 80;
-/** Call audio counts as active this long after the last report. */
-const ACTIVITY_MS = 250;
+/** Bars fall flat when no level arrived for this long. */
+const LEVEL_STALE_MS = 500;
+
+/** Maps an amplitude (0..1) to 0..1 on a dB scale: -54 dB is silent, -6 dB full. */
+export function levelHeight(amplitude: number): number {
+	const db = 20 * Math.log10(Math.max(amplitude, 1e-5));
+	return Math.min(1, Math.max(0, (db + 54) / 48));
+}
 
 /** The live status block width: fixed per terminal width, so it never jitters. */
 export function liveStatusWidth(width: number): number {
@@ -120,7 +126,8 @@ export class VoiceEditorStatus {
 		assistant: { text: "", final: false },
 	};
 	private speaker: "user" | "assistant" | undefined;
-	private lastAudio = 0;
+	private levels = [0, 0, 0];
+	private lastLevel = 0;
 	/** Test hook: frames rendered, and the clock. */
 	now: () => number = Date.now;
 
@@ -146,20 +153,23 @@ export class VoiceEditorStatus {
 		return true;
 	}
 
-	/** Call audio is playing; the wave rises until activity stops. */
-	audioActivity(): void {
-		this.lastAudio = this.now();
+	/**
+	 * A live level sample: microphone input and call output amplitude (0..1).
+	 * The louder one (whoever is speaking) feeds a three-bar rolling meter.
+	 */
+	level(input: number, output: number): void {
+		this.levels = [
+			...this.levels.slice(1),
+			levelHeight(Math.max(input, output)),
+		];
+		this.lastLevel = this.now();
 	}
 
-	/** Three bars: tall and moving while audio plays, a low ripple otherwise. */
+	/** Three bars: the last three level samples; flat when no level arrives. */
 	wave(): string {
-		const loud = this.now() - this.lastAudio < ACTIVITY_MS;
-		return [0, 1, 2]
-			.map((bar) => {
-				const phase = (this.frame + bar * 2) % 6;
-				const height = loud ? 3 + Math.abs(3 - phase) : phase === 0 ? 1 : 0;
-				return LEVELS[Math.min(LEVELS.length - 1, height)];
-			})
+		if (this.now() - this.lastLevel > LEVEL_STALE_MS) return "▁▁▁";
+		return this.levels
+			.map((height) => LEVELS[Math.round(height * (LEVELS.length - 1))])
 			.join("");
 	}
 
@@ -189,7 +199,7 @@ export class VoiceEditorStatus {
 		const spoken = this.speaker
 			? this.sides[this.speaker].text.trim().replace(/\s+/g, " ")
 			: "";
-		const tag = this.speaker === "user" ? "you: " : "gip: ";
+		const tag = this.speaker === "user" ? "you: " : "agent: ";
 		const room = size - visibleWidth(head) - 1 - tag.length;
 		const words = spoken && room > 1 ? fit(spoken, room, true) : "";
 		const label = fit(

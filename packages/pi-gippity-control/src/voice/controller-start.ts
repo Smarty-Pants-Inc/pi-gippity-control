@@ -94,7 +94,7 @@ export async function startControllerMode(options: {
 		text: string,
 		final: boolean,
 	): void;
-	onAudioActivity?(): void;
+	onAudioLevel?(input: number, output: number): void;
 }): Promise<CodexRealtimeConversation | undefined> {
 	const { runtime, signal } = options;
 	if (signal?.aborted) return;
@@ -266,9 +266,7 @@ async function startConversation(
 			...(options.onLiveTranscript
 				? { onLiveTranscript: options.onLiveTranscript }
 				: {}),
-			...(options.onAudioActivity
-				? { onAudioActivity: options.onAudioActivity }
-				: {}),
+			...(options.onAudioLevel ? { onAudioLevel: options.onAudioLevel } : {}),
 		},
 	});
 }

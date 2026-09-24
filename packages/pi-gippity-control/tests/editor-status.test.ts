@@ -31,7 +31,7 @@ describe("voice status inside the editor border", () => {
 			const lines = realEditor("typing a question").render(width);
 			const decorated = decorateEditorBorders(lines, width, {
 				top: "GipPity LAN · ▂▅▇ listening · muted",
-				bottom: `you: ${"can you check the build on dev two ".repeat(4)} gip: sure`,
+				bottom: `you: ${"can you check the build on dev two ".repeat(4)} agent: sure`,
 			});
 			expect(decorated).toHaveLength(lines.length);
 			for (const line of decorated) expect(visibleWidth(line)).toBe(width);
@@ -116,7 +116,7 @@ describe("voice status inside the editor border", () => {
 		expect(blocks[0]).toMatch(/^[▁-▇]{3} muted you: /);
 		status.transcript("assistant", "It is green", false);
 		blocks.push(status.labels(80).bottom);
-		expect(blocks[1]).toContain("gip: It is green");
+		expect(blocks[1]).toContain("agent: It is green");
 		expect(blocks[1]).not.toContain("you:");
 		status.transcript(
 			"assistant",
@@ -124,7 +124,7 @@ describe("voice status inside the editor border", () => {
 			false,
 		);
 		blocks.push(status.labels(80).bottom);
-		expect(blocks[2]).toMatch(/ gip: ….*on main *$/);
+		expect(blocks[2]).toMatch(/ agent: ….*on main *$/);
 		// Fixed width: no jitter as text grows; 40 columns at 80, 45% when narrow.
 		for (const block of blocks) expect(width(block)).toBe(liveStatusWidth(80));
 		expect(liveStatusWidth(80)).toBe(36);
@@ -192,7 +192,7 @@ describe("live transcript text", () => {
 		for (const delta of ["Hey", " there!", " What's", " up?"])
 			status.transcript("assistant", delta, false);
 		expect(status.labels(200).bottom.trim()).toMatch(
-			/gip: Hey there! What's up\?$/,
+			/agent: Hey there! What's up\?$/,
 		);
 	});
 });
@@ -214,7 +214,7 @@ function fakeContextForTranscript() {
 }
 
 describe("live status animation", () => {
-	test("renders at about 12 fps during a call and rises with call audio", async () => {
+	test("renders at about 12 fps during a call; bars follow real levels", async () => {
 		const { ctx } = fakeContextForTranscript();
 		const status = new VoiceEditorStatus();
 		status.setCall(ctx as never, {
@@ -237,12 +237,22 @@ describe("live status animation", () => {
 		renders = 0;
 		await new Promise((resolve) => setTimeout(resolve, 500));
 		expect(renders).toBeGreaterThanOrEqual(5);
-		const quiet = status.wave();
-		status.audioActivity();
-		const loud = status.wave();
+		expect(status.wave()).toBe("▁▁▁");
 		const height = (wave: string) =>
 			[...wave].reduce((sum, bar) => sum + "▁▂▃▄▅▆▇".indexOf(bar), 0);
-		expect(height(loud)).toBeGreaterThan(height(quiet));
+		for (let i = 0; i < 3; i++) status.level(0.003, 0); // quiet speech, about -50 dB
+		const quiet = status.wave();
+		for (let i = 0; i < 3; i++) status.level(0.3, 0); // loud speech, about -10 dB
+		const loud = status.wave();
+		for (let i = 0; i < 3; i++) status.level(0, 0.3); // the voice speaking
+		expect(status.wave()).toBe(loud);
+		expect(height(loud)).toBeGreaterThan(height(quiet) + 9);
+		expect(loud).toBe("▆▆▆");
+		// Flat again when no level arrives.
+		const now = Date.now();
+		status.now = () => now + 1000;
+		expect(status.wave()).toBe("▁▁▁");
+		status.now = Date.now;
 		status.setCall(ctx as never, undefined);
 		renders = 0;
 		await new Promise((resolve) => setTimeout(resolve, 200));

@@ -43,8 +43,29 @@ export const LAN_REMOTE_CLIENT_SCRIPT = String.raw`
   function createDirectCall({ stream, send, devices }) {
     const pc = new RTCPeerConnection();
     const audio = new Audio(); audio.autoplay = true;
-    let closed = false, levelTimer;
+    let closed = false, levelTimer, receiver;
     for (const track of stream.getAudioTracks()) pc.addTrack(track, stream);
+    // Microphone level: RMS of the live input (0 while muted).
+    let meter;
+    try {
+      const context = new AudioContext();
+      const analyser = context.createAnalyser(); analyser.fftSize = 1024;
+      context.createMediaStreamSource(stream).connect(analyser);
+      const samples = new Float32Array(analyser.fftSize);
+      meter = { context, read() {
+        if (!stream.getAudioTracks().some((track) => track.enabled)) return 0;
+        analyser.getFloatTimeDomainData(samples);
+        let sum = 0; for (const value of samples) sum += value * value;
+        return Math.sqrt(sum / samples.length);
+      } };
+    } catch {}
+    // About 14 samples a second of mic and call output levels.
+    levelTimer = setInterval(() => {
+      const output = receiver?.getSynchronizationSources?.()[0]?.audioLevel ?? 0;
+      const input = meter?.read() ?? 0;
+      call.level = output; call.inputLevel = input;
+      send({ type:'rtc.level', input, output });
+    }, 70);
     const channel = pc.createDataChannel('oai-events');
     channel.onopen = () => send({ type:'rtc.state', state:'ready' });
     channel.onmessage = (event) => {
@@ -60,15 +81,10 @@ export const LAN_REMOTE_CLIENT_SCRIPT = String.raw`
     pc.ontrack = (event) => {
       audio.srcObject = event.streams[0] || new MediaStream([event.track]);
       void devices.attach(audio); void audio.play().catch(() => {});
-      clearInterval(levelTimer);
-      levelTimer = setInterval(() => {
-        const level = event.receiver.getSynchronizationSources?.()[0]?.audioLevel ?? 0;
-        call.level = level;
-        if (level > 0.01) send({ type:'rtc.playback', level });
-      }, 80);
+      receiver = event.receiver;
     };
     const call = {
-      pc, audio, level:0,
+      pc, audio, level:0, inputLevel:0,
       async offer() {
         await pc.setLocalDescription(await pc.createOffer());
         if (pc.iceGatheringState !== 'complete')
@@ -87,6 +103,7 @@ export const LAN_REMOTE_CLIENT_SCRIPT = String.raw`
       close() {
         if (closed) return; closed = true;
         clearInterval(levelTimer); devices.detach(audio);
+        void meter?.context.close().catch(() => {});
         audio.pause(); audio.srcObject = null;
         try { channel.close(); } catch {}
         pc.close();

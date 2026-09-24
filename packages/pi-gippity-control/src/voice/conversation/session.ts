@@ -42,8 +42,8 @@ export interface CodexConversationCallbacks {
 		text: string,
 		final: boolean,
 	): void;
-	/** Call audio is playing now; drives the on-screen level. */
-	onAudioActivity?(): void;
+	/** Live mic and call output levels (0..1), about 14 per second. */
+	onAudioLevel?(input: number, output: number): void;
 }
 
 export class CodexRealtimeConversation {
@@ -250,10 +250,9 @@ export class CodexRealtimeConversation {
 			else this.fail(error);
 			return;
 		}
-		if (event.type === "playback_activity") {
-			this.playback.audioActivity();
-			this.callbacks.onAudioActivity?.();
-		}
+		if (event.type === "playback_activity") this.playback.audioActivity();
+		if (event.type === "level")
+			this.callbacks.onAudioLevel?.(event.input, event.output);
 		if (event.type === "data") this.handleServerEvent(event.message);
 		if (event.type === "state") this.handleHelperState(event.state);
 	}

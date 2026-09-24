@@ -6,6 +6,8 @@ export type CodexRealtimePeerEvent =
 	| { type: "state"; state: string }
 	| { type: "data"; message: unknown }
 	| { type: "playback_activity" }
+	/** Live audio levels, 0..1 amplitude: microphone input and call output. */
+	| { type: "level"; input: number; output: number }
 	| { type: "error"; message: string };
 
 interface CodexRealtimePeerBase {

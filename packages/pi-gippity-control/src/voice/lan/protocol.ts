@@ -16,7 +16,7 @@ export type LanVoiceRtcCommand =
 	| { type: "rtc.offer"; sdp: string }
 	| { type: "rtc.data"; message: Record<string, unknown> }
 	| { type: "rtc.state"; state: string }
-	| { type: "rtc.playback"; level: number }
+	| { type: "rtc.level"; input: number; output: number }
 	| { type: "rtc.error"; message: string };
 
 const RTC_STATES = new Set([
@@ -109,16 +109,12 @@ function decodeRtcCommand(
 			throw invalidCommand();
 		return { type: "rtc.state", state };
 	}
-	if (value.type === "rtc.playback") {
-		const level = record["level"];
+	if (value.type === "rtc.level")
 		return {
-			type: "rtc.playback",
-			level:
-				typeof level === "number" && Number.isFinite(level)
-					? Math.min(1, Math.max(0, level))
-					: 0,
+			type: "rtc.level",
+			input: unitLevel(record["input"]),
+			output: unitLevel(record["output"]),
 		};
-	}
 	if (value.type === "rtc.error") {
 		const message = record["message"];
 		if (typeof message !== "string") throw invalidCommand();
@@ -140,6 +136,12 @@ function validSelectionIndex(
 		value >= 0 &&
 		value <= draftLength
 	);
+}
+
+function unitLevel(value: unknown): number {
+	return typeof value === "number" && Number.isFinite(value)
+		? Math.min(1, Math.max(0, value))
+		: 0;
 }
 
 function invalidCommand(): Error {
