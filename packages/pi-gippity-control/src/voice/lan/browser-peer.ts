@@ -15,6 +15,8 @@ export class LanHostRealtimePeer implements CodexRealtimeWebRtcPeer {
 	private playbackEpoch = 0;
 	private speakerSuppressed = false;
 	private lastActivity = 0;
+	private levels = { input: 0, inputAt: 0, output: 0, outputAt: 0, sentAt: 0 };
+	private levelListener: ((event: CodexRealtimePeerEvent) => void) | undefined;
 
 	constructor(options: {
 		onAudio(pcm: Buffer): void;
@@ -29,11 +31,16 @@ export class LanHostRealtimePeer implements CodexRealtimeWebRtcPeer {
 	}
 
 	onEvent(listener: (event: CodexRealtimePeerEvent) => void): () => void {
+		this.levelListener = listener;
 		return this.helper.onEvent((event) => {
 			if (event.type === "pcm") {
 				if (this.speakerSuppressed || event.epoch !== this.playbackEpoch)
 					return;
-				this.onAudio(Buffer.from(event.audio, "base64"));
+				const pcm = Buffer.from(event.audio, "base64");
+				this.onAudio(pcm);
+				this.levels.output = pcmRms(pcm);
+				this.levels.outputAt = Date.now();
+				this.emitLevel();
 				// Relayed audio is playing; report it at most 10 times a second.
 				const now = Date.now();
 				if (now - this.lastActivity >= 100) {
@@ -87,7 +94,23 @@ export class LanHostRealtimePeer implements CodexRealtimeWebRtcPeer {
 		this.helper.send({ type: "send_data", message });
 	}
 
+	/** Reports relayed mic and call levels, at most about 14 times a second. */
+	private emitLevel(): void {
+		const now = Date.now();
+		if (now - this.levels.sentAt < 70) return;
+		this.levels.sentAt = now;
+		const fresh = (value: number, at: number) => (now - at < 200 ? value : 0);
+		this.levelListener?.({
+			type: "level",
+			input: fresh(this.levels.input, this.levels.inputAt),
+			output: fresh(this.levels.output, this.levels.outputAt),
+		});
+	}
+
 	sendAudio(pcm: Buffer): void {
+		this.levels.input = pcmRms(pcm);
+		this.levels.inputAt = Date.now();
+		this.emitLevel();
 		this.helper.send({
 			type: "send_pcm",
 			audio: pcm.toString("base64"),
@@ -125,4 +148,16 @@ function toPeerEvent(
 	)
 		return event;
 	return undefined;
+}
+
+/** RMS amplitude (0..1) of 16-bit little-endian PCM. */
+export function pcmRms(pcm: Buffer): number {
+	const samples = Math.floor(pcm.byteLength / 2);
+	if (samples === 0) return 0;
+	let sum = 0;
+	for (let index = 0; index < samples; index++) {
+		const value = pcm.readInt16LE(index * 2) / 32768;
+		sum += value * value;
+	}
+	return Math.sqrt(sum / samples);
 }

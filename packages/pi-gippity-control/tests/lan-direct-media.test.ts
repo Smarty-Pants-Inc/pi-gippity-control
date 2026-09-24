@@ -164,11 +164,16 @@ describe("browser-direct call media", () => {
 				type: "rtc.data",
 				message: { type: "input_transcript.added", item: { text: "hi" } },
 			});
-			page.send({ type: "rtc.playback", level: 0.4 });
+			page.send({ type: "rtc.level", input: 0.02, output: 0.4 });
 			await pause();
 			expect(state.events).toContainEqual({
 				type: "data",
 				message: { type: "input_transcript.added", item: { text: "hi" } },
+			});
+			expect(state.events).toContainEqual({
+				type: "level",
+				input: 0.02,
+				output: 0.4,
 			});
 			expect(state.events).toContainEqual({ type: "playback_activity" });
 
@@ -258,5 +263,23 @@ describe("browser-direct call media", () => {
 		expect(() =>
 			decode({ type: "mute", muted: true, pad: "x".repeat(70_000) }),
 		).toThrow(/too large/);
+	});
+});
+
+describe("relayed audio levels", () => {
+	test("PCM RMS separates loud from quiet", async () => {
+		const { pcmRms } = await import("../src/voice/lan/browser-peer.ts");
+		const tone = (amplitude: number) => {
+			const pcm = Buffer.alloc(960);
+			for (let i = 0; i < 480; i++)
+				pcm.writeInt16LE(
+					Math.round(Math.sin(i / 5) * amplitude * 32767),
+					i * 2,
+				);
+			return pcm;
+		};
+		expect(pcmRms(tone(0.5))).toBeCloseTo(0.5 / Math.SQRT2, 1);
+		expect(pcmRms(tone(0.01))).toBeLessThan(0.01);
+		expect(pcmRms(Buffer.alloc(0))).toBe(0);
 	});
 });

@@ -103,7 +103,14 @@ export class BrowserDirectRealtimePeer implements CodexRealtimeWebRtcPeer {
 			this.emit({ type: "data", message: command.message });
 		else if (command.type === "rtc.state")
 			this.emit({ type: "state", state: command.state });
-		else this.emit({ type: "playback_activity" });
+		else {
+			this.emit({
+				type: "level",
+				input: command.input,
+				output: command.output,
+			});
+			if (command.output > 0.01) this.emit({ type: "playback_activity" });
+		}
 	}
 
 	async close(): Promise<void> {
