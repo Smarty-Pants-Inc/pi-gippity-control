@@ -2,7 +2,11 @@ import type { GippityControlConfig } from "../../config.ts";
 import type { CodexVoiceAuth } from "../auth.ts";
 import type { RealtimeInitialMessageItem } from "../context.ts";
 import { MAX_REALTIME_VOICE_INPUT_BYTES } from "../prompts.ts";
-import { type RealtimeVoiceTurn, RealtimeVoiceTurnTracker } from "../turns.ts";
+import {
+	type RealtimeVoiceTurn,
+	RealtimeVoiceTurnTracker,
+	UNDELEGATED_TIMING,
+} from "../turns.ts";
 import {
 	buildRealtimeCallRequest,
 	type RealtimeCallSetup,
@@ -42,6 +46,8 @@ export interface CodexConversationCallbacks {
 		text: string,
 		final: boolean,
 	): void;
+	/** A final user turn no delegation carried to Pi (sent once). */
+	onUndelegatedTurn?(text: string): void;
 	/** Live mic and call output levels (0..1), about 14 per second. */
 	onAudioLevel?(input: number, output: number): void;
 }
@@ -50,6 +56,7 @@ export class CodexRealtimeConversation {
 	private readonly callbacks: CodexConversationCallbacks;
 	private readonly peer: CodexRealtimePeer;
 	private readonly turnTracker = new RealtimeVoiceTurnTracker();
+	private readonly undelegatedTimers = new Set<ReturnType<typeof setTimeout>>();
 	private readonly handoff: RealtimeDelegationHandoff;
 	private readonly playback: RealtimePlayback;
 	private state: ConversationState = "idle";
@@ -224,7 +231,28 @@ export class CodexRealtimeConversation {
 		return this.closePromise;
 	}
 
+	/**
+	 * Safety net: the voice model sometimes answers a request itself. Any final
+	 * user turn that no delegation carried to Pi is sent to Pi on its own.
+	 */
+	private checkUndelegatedAfter(delayMs: number): void {
+		const timer = setTimeout(() => {
+			this.undelegatedTimers.delete(timer);
+			if (this.state !== "active") return;
+			for (const text of this.turnTracker.takeUndelegated())
+				this.callbacks.onUndelegatedTurn?.(text);
+		}, delayMs + 5);
+		timer.unref?.();
+		this.undelegatedTimers.add(timer);
+	}
+
+	private clearUndelegatedTimers(): void {
+		for (const timer of this.undelegatedTimers) clearTimeout(timer);
+		this.undelegatedTimers.clear();
+	}
+
 	private async closeSession(): Promise<void> {
+		this.clearUndelegatedTimers();
 		this.state = "closed";
 		this.established = false;
 		this.speakableResponsePending = false;
@@ -363,8 +391,10 @@ export class CodexRealtimeConversation {
 				Boolean(input),
 			);
 			if (input) this.callbacks.onLiveTranscript?.("user", input, true);
-			if (input && this.turnTracker.userFinished(input))
+			if (input && this.turnTracker.userFinished(input)) {
 				this.callbacks.onUserTranscript(input);
+				this.checkUndelegatedAfter(UNDELEGATED_TIMING.backstopMs);
+			}
 			this.callbacks.onStatus("responding");
 			return;
 		}
@@ -374,6 +404,7 @@ export class CodexRealtimeConversation {
 		if (finalOutput)
 			this.callbacks.onLiveTranscript?.("assistant", finalOutput, true);
 		const completed = this.turnTracker.assistantFinished(finalOutput);
+		this.checkUndelegatedAfter(UNDELEGATED_TIMING.afterResponseMs);
 		this.speakableResponsePending = false;
 		this.callbacks.onStatus("listening");
 		if (completed) this.callbacks.onTurn(completed);
@@ -439,6 +470,7 @@ export class CodexRealtimeConversation {
 		)
 			return;
 		this.state = "failed";
+		this.clearUndelegatedTimers();
 		this.established = false;
 		this.speakableResponsePending = false;
 		this.abortSetup();

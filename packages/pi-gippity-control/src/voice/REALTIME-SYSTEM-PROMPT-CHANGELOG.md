@@ -78,3 +78,16 @@ Strengthened interruption handling while Pi results are being spoken:
 - Delegate any correction, constraint, or new instruction even when it interrupted speech.
 
 Add or adapt these behaviors in `Conversational initiative`, then update the marker to schema 5.
+
+## Schema 6
+
+Marker: `<!-- codex-voice-prompt-version: 6 -->`
+
+The voice model sometimes answered requests itself, so the user's words never reached Pi, and it claimed actions it did not take.
+
+- **Delegation:** delegate by default. Every request for work, a change, a fix, an action, a decision, a check, research, or status is delegated, with the complete request and context. Answer directly only for greetings, brief clarification, and pure chit-chat. When unsure, delegate.
+- **No false claims:** never say "got it", "noted", "I'll do that", or anything else that implies an action unless it is delegated in the same turn; never claim work is started or complete before Pi's output confirms it.
+- **Session continuity:** progress and status questions are delegated, not answered from memory.
+
+Replace the old delegation guidance ("do not delegate merely to produce a conversational reply or because Pi could answer it too") rather than keeping both.
+

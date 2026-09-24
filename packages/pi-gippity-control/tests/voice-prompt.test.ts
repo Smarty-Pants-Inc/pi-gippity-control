@@ -24,7 +24,7 @@ describe("realtime prompt persistence", () => {
 		expect(prepareCodexVoiceSystemPrompt(promptPath)).toEqual({
 			created: false,
 			schemaVersion: 2,
-			currentSchemaVersion: 5,
+			currentSchemaVersion: 6,
 			current: false,
 		});
 		expect(await readFile(promptPath, "utf8")).toBe(customized);

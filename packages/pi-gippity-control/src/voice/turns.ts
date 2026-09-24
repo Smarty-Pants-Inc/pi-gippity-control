@@ -15,7 +15,20 @@ interface TranscriptEntry {
 	role: "user" | "assistant";
 	text: string;
 	final: boolean;
+	/** Reached Pi inside a delegation (input or transcript delta). */
+	claimed?: boolean;
+	/** Sent to Pi on its own as an undelegated voice turn. */
+	forwarded?: boolean;
+	finishedAt?: number;
 }
+
+/** When an unclaimed user turn is sent to Pi on its own. */
+export const UNDELEGATED_TIMING = {
+	/** After the voice's response to it completed. */
+	afterResponseMs: 3_000,
+	/** Even if no response completed. */
+	backstopMs: 10_000,
+};
 
 interface PendingDelegation {
 	input: string;
@@ -48,7 +61,11 @@ class RealtimeTranscriptBuffer {
 		this.bound();
 	}
 
-	finish(role: TranscriptEntry["role"], transcript: string): TranscriptEntry {
+	finish(
+		role: TranscriptEntry["role"],
+		transcript: string,
+		now = Date.now(),
+	): TranscriptEntry {
 		const text = transcript.trim();
 		const current = this.entries.find(
 			(entry) => entry.role === role && !entry.final,
@@ -56,9 +73,15 @@ class RealtimeTranscriptBuffer {
 		if (current) {
 			current.text = text;
 			current.final = true;
+			current.finishedAt = now;
 			if (this.active.get(role) === current) this.active.delete(role);
 		} else {
-			const entry = { role, text, final: true };
+			const entry: TranscriptEntry = {
+				role,
+				text,
+				final: true,
+				finishedAt: now,
+			};
 			this.entries.push(entry);
 			this.bound();
 			return entry;
@@ -70,6 +93,7 @@ class RealtimeTranscriptBuffer {
 	take(): string | undefined {
 		if (this.entries.length === 0) return undefined;
 		const transcript = this.render();
+		claim(this.entries);
 		this.reset();
 		return transcript;
 	}
@@ -87,18 +111,22 @@ class RealtimeTranscriptBuffer {
 				: this.entries
 						.slice(0, currentUserIndex + 1)
 						.filter(({ final }) => final);
+		currentUser.claimed = true;
 		if (
 			history.at(-1) === currentUser &&
 			normalizeWhitespace(input).includes(normalizeWhitespace(currentUser.text))
 		)
 			history.pop();
 		const transcript = this.render(history);
+		claim(history);
 		this.reset();
 		return transcript || undefined;
 	}
 
 	takeFinalized(): string | undefined {
-		const transcript = this.render(this.entries.filter(({ final }) => final));
+		const finalized = this.entries.filter(({ final }) => final);
+		const transcript = this.render(finalized);
+		claim(finalized);
 		this.reset();
 		return transcript || undefined;
 	}
@@ -120,14 +148,25 @@ class RealtimeTranscriptBuffer {
 			if (!this.entries.includes(entry)) this.active.delete(role);
 	}
 
+	/** Entries already sent to Pi on their own are not repeated. */
 	private render(entries = this.entries): string {
-		return entries.map(({ role, text }) => `${role}: ${text}`).join("\n");
+		return entries
+			.filter((entry) => !entry.forwarded)
+			.map(({ role, text }) => `${role}: ${text}`)
+			.join("\n");
 	}
+}
+
+function claim(entries: TranscriptEntry[]): void {
+	for (const entry of entries) entry.claimed = true;
 }
 
 /** Keeps conversational display turns separate from V3 delegation handoffs. */
 export class RealtimeVoiceTurnTracker {
 	private readonly transcript = new RealtimeTranscriptBuffer();
+	/** Final user turns not yet claimed by a delegation nor forwarded. */
+	private userEntries: TranscriptEntry[] = [];
+	private lastAssistantDoneAt: number | undefined;
 	private pendingUserInputs: PendingUserInput[] = [];
 	private recentlyAnsweredUserInput: PendingUserInput | undefined;
 	private unfinishedUserTurns: object[] = [];
@@ -151,15 +190,16 @@ export class RealtimeVoiceTurnTracker {
 		this.transcript.append("assistant", output);
 	}
 
-	userFinished(input: string): boolean {
+	userFinished(input: string, now = Date.now()): boolean {
 		if (this.delegatedUserFinishes > 0) {
 			this.delegatedUserFinishes -= 1;
 			return false;
 		}
 		const turn = this.unfinishedUserTurns.shift();
 		if (this.activeUserTurn === turn) this.activeUserTurn = undefined;
-		const transcript = this.transcript.finish("user", input);
+		const transcript = this.transcript.finish("user", input, now);
 		this.pendingUserInputs.push({ input, transcript });
+		this.userEntries.push(transcript);
 		return true;
 	}
 
@@ -219,11 +259,40 @@ export class RealtimeVoiceTurnTracker {
 		this.outstandingInputs.delete(input);
 	}
 
-	assistantFinished(output?: string): RealtimeVoiceTurn | undefined {
+	assistantFinished(
+		output?: string,
+		now = Date.now(),
+	): RealtimeVoiceTurn | undefined {
+		this.lastAssistantDoneAt = now;
 		if (output) this.transcript.finish("assistant", output);
 		const answered = this.pendingUserInputs.shift();
 		if (answered) this.recentlyAnsweredUserInput = answered;
 		return output ? { input: output } : undefined;
+	}
+
+	/**
+	 * Final user turns that no delegation carried to Pi: due a few seconds
+	 * after the voice's response completed, or after a backstop. Each is
+	 * returned once and never repeated in a later delta or tail.
+	 */
+	takeUndelegated(now = Date.now()): string[] {
+		const due = this.userEntries.filter(
+			(entry) =>
+				!entry.claimed &&
+				!entry.forwarded &&
+				entry.text &&
+				entry.finishedAt !== undefined &&
+				((this.lastAssistantDoneAt !== undefined &&
+					this.lastAssistantDoneAt >= entry.finishedAt &&
+					now - this.lastAssistantDoneAt >=
+						UNDELEGATED_TIMING.afterResponseMs) ||
+					now - entry.finishedAt >= UNDELEGATED_TIMING.backstopMs),
+		);
+		for (const entry of due) entry.forwarded = true;
+		this.userEntries = this.userEntries.filter(
+			(entry) => !entry.claimed && !entry.forwarded,
+		);
+		return due.map((entry) => entry.text);
 	}
 
 	takeTranscriptTail(): string | undefined {
@@ -241,6 +310,8 @@ export class RealtimeVoiceTurnTracker {
 
 	reset(): void {
 		this.transcript.reset();
+		this.userEntries = [];
+		this.lastAssistantDoneAt = undefined;
 		this.pendingUserInputs = [];
 		this.recentlyAnsweredUserInput = undefined;
 		this.unfinishedUserTurns = [];
