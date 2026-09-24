@@ -1,0 +1,10 @@
+2026-09-24T00:48:36.597Z /gippity: the opener got the page URL
+2026-09-24T00:48:39.995Z call 1: call up in the page's own WebRTC connection; {"packetsReceived":55,"packetsLost":0,"jitterMs":1,"jitterBufferMs":26,"concealedPct":0,"concealmentEvents":0,"totalAudioSec":1.9,"rttMs":14}
+2026-09-24T00:48:43.007Z call 1: Pi status line changed 13.0 times/s; e.g. "───────────────────────────────────────────────────────────────────────────── ▁▁▁ gip: … there. Good to hear from you. ─"
+2026-09-24T00:49:23.221Z call 1: after 40s {"packetsReceived":2163,"packetsLost":0,"jitterMs":1,"jitterBufferMs":48,"concealedPct":0.01,"concealmentEvents":1,"totalAudioSec":44.1,"rttMs":15}; call audio bytes over the host socket: 0
+2026-09-24T00:49:23.441Z /gippity stop: page reset
+2026-09-24T00:49:27.149Z call 2 (after /gippity stop): call up in the page's own WebRTC connection; {"packetsReceived":53,"packetsLost":0,"jitterMs":1,"jitterBufferMs":32,"concealedPct":1.04,"concealmentEvents":1,"totalAudioSec":1.8,"rttMs":15}
+2026-09-24T00:49:30.173Z call 2 (after /gippity stop): Pi status line changed 12.7 times/s; e.g. "───────────────────────────────────────────────────────────────────────────── ▂▁▁ gip: Hey hey! What's on your mind?   ─"
+2026-09-24T00:50:10.391Z call 2 (after /gippity stop): after 40s {"packetsReceived":2163,"packetsLost":0,"jitterMs":1,"jitterBufferMs":54,"concealedPct":0.03,"concealmentEvents":1,"totalAudioSec":44,"rttMs":15}; call audio bytes over the host socket: 0
+2026-09-24T00:50:10.452Z done: [{"packetsReceived":2163,"packetsLost":0,"jitterMs":1,"jitterBufferMs":48,"concealedPct":0.01,"concealmentEvents":1,"totalAudioSec":44.1,"rttMs":15},{"packetsReceived":2163,"packetsLost":0,"jitterMs":1,"jitterBufferMs":54,"concealedPct":0.03,"concealmentEvents":1,"totalAudioSec":44,"rttMs":15}]; call audio bytes over the host socket: 0
+2026-09-24T00:50:10.706Z video: /tmp/gip-e2e2/out/video/page@9a3772c5349d38a1a029e102dd62e1c4.webm
