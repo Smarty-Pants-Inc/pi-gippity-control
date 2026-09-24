@@ -1,8 +1,10 @@
 export const LAN_VOICE_AUDIO_WORKLET = String.raw`
 const TARGET_RATE = 24000;
 const CAPTURE_FRAME_SAMPLES = 480;
-const PLAYBACK_START_SAMPLES = 1440;
-const PLAYBACK_MAX_SAMPLES = 6000;
+// Relayed audio crosses TCP (often an SSH tunnel) and arrives in bursts:
+// start after 200 ms and hold up to 3 s so a burst never drops audio.
+const PLAYBACK_START_SAMPLES = 4800;
+const PLAYBACK_MAX_SAMPLES = 72000;
 
 class PiLanVoiceProcessor extends AudioWorkletProcessor {
   constructor() {
