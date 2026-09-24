@@ -157,7 +157,7 @@ export class RealtimeDelegationHandoff {
 		const text = (this.streamedProgress ? this.buffer : fallback).trim();
 		this.buffer = "";
 		this.streamedProgress = false;
-		if (!this.callbacks.isActive() || !this.target || !text) return;
+		if (!this.callbacks.isActive() || !this.target || silent(text)) return;
 		this.callbacks.onContext({ type: "session" }, "speakable", text);
 	}
 
@@ -167,7 +167,7 @@ export class RealtimeDelegationHandoff {
 		).trim();
 		this.buffer = "";
 		this.streamedProgress = false;
-		if (!this.callbacks.isActive() || !this.target || !text) return;
+		if (!this.callbacks.isActive() || !this.target || silent(text)) return;
 		this.callbacks.onContext(this.target, "speakable", text);
 	}
 
@@ -180,6 +180,14 @@ export class RealtimeDelegationHandoff {
 		if (this.target?.type === "delegation")
 			this.callbacks.onSettled(this.target.id);
 	}
+}
+
+/**
+ * Pi answers an undelegated voice turn that needs no work with exactly NOOP;
+ * the voice already replied, so nothing is spoken.
+ */
+function silent(text: string): boolean {
+	return !text || text === "NOOP";
 }
 
 function secondSentenceBoundary(text: string): number | undefined {

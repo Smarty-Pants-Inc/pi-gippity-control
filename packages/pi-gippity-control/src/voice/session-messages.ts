@@ -3,7 +3,10 @@ import type {
 	ExtensionAPI,
 	ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
-import { renderRealtimeTranscriptTail } from "./prompts.ts";
+import {
+	renderRealtimeTranscriptTail,
+	renderUndelegatedVoiceTurn,
+} from "./prompts.ts";
 import type { RealtimeVoiceTurn } from "./turns.ts";
 import {
 	CODEX_VOICE_MODE_MESSAGE_TYPE,
@@ -20,6 +23,7 @@ import {
 } from "./ui.ts";
 
 const REALTIME_VOICE_TAIL_CONTEXT_TYPE = "gippity-realtime-voice-tail";
+export const UNDELEGATED_VOICE_TURN_TYPE = "gippity-undelegated-voice-turn";
 
 export interface CodexVoiceSessionMessageCallbacks {
 	canDelegate(): boolean;
@@ -96,6 +100,29 @@ export class CodexVoiceSessionMessages {
 		const ctx = this.context;
 		if (!ctx) return;
 		this.deliverDelegation(turn, !this.piTurnActive && ctx.isIdle());
+	}
+
+	/**
+	 * Sends Pi a final user turn the voice model did not delegate, so nothing
+	 * Paul says is dropped: it steers a running turn or starts one. Pi replies
+	 * NOOP when no work is asked for, and NOOP is never spoken.
+	 */
+	undelegatedTurn(text: string): void {
+		const ctx = this.context;
+		if (!ctx) return;
+		const startsTurn = !this.piTurnActive && ctx.isIdle();
+		this.piTurnActive = true;
+		this.pi.sendMessage(
+			{
+				customType: UNDELEGATED_VOICE_TURN_TYPE,
+				content: renderUndelegatedVoiceTurn(text),
+				display: true,
+				details: { text },
+			},
+			startsTurn
+				? { triggerTurn: true }
+				: { triggerTurn: true, deliverAs: "steer" },
+		);
 	}
 
 	retainTranscriptTail(transcriptDelta: string): void {

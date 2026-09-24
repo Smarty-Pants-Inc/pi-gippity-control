@@ -14,6 +14,11 @@ export function renderRealtimeConversationInput(input: string): string {
 	return `<realtime_voice_turn>\n  <input>${escapeXml(input)}</input>\n  <routing>handled by realtime voice; no Pi action requested</routing>\n</realtime_voice_turn>`;
 }
 
+/** A final user turn the voice model answered without delegating it. */
+export function renderUndelegatedVoiceTurn(input: string): string {
+	return `<realtime_voice_turn>\n  <input>${escapeXml(input)}</input>\n  <routing>Undelegated voice turn: the voice already replied to this. Act only if it asks for work, a change, a decision or status; otherwise reply exactly NOOP.</routing>\n</realtime_voice_turn>`;
+}
+
 export function renderRealtimeTranscriptTail(transcriptDelta: string): string {
 	return `<realtime_delegation>\n  <source>transcript_tail_flush</source>\n  <input>Remaining voice transcript. Do not respond unless it contains an unhandled request.</input>\n  <transcript_delta>${escapeXml(transcriptDelta)}</transcript_delta>\n</realtime_delegation>`;
 }

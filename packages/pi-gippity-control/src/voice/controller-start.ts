@@ -263,6 +263,7 @@ async function startConversation(
 				options.messages.userTranscript(transcript),
 			onTranscriptTail: (transcript) =>
 				options.messages.retainTranscriptTail(transcript),
+			onUndelegatedTurn: (text) => options.messages.undelegatedTurn(text),
 			...(options.onLiveTranscript
 				? { onLiveTranscript: options.onLiveTranscript }
 				: {}),
