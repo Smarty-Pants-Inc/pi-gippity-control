@@ -25,6 +25,8 @@ const TRANSCRIPT_CHARS = 400;
 const LEVELS = "▁▂▃▄▅▆▇";
 /** About 12 fps: smooth, and cheap for the TUI. */
 const FRAME_MS = 80;
+/** About -32 dB: speech, not room noise. Two samples in a row switch the label. */
+const SPEECH_HEIGHT = 0.45;
 /** Bars fall flat when no level arrived for this long. */
 const LEVEL_STALE_MS = 500;
 
@@ -126,6 +128,7 @@ export class VoiceEditorStatus {
 		assistant: { text: "", final: false },
 	};
 	private speaker: "user" | "assistant" | undefined;
+	private readonly loud = { user: 0, assistant: 0 };
 	private levels = [0, 0, 0];
 	private lastLevel = 0;
 	/** Test hook: frames rendered, and the clock. */
@@ -163,6 +166,20 @@ export class VoiceEditorStatus {
 			levelHeight(Math.max(input, output)),
 		];
 		this.lastLevel = this.now();
+		// Whoever is audibly speaking owns the label at once, before any
+		// transcript arrives; a finished old turn gives way to "…".
+		const speaking =
+			levelHeight(input) >= SPEECH_HEIGHT && input >= output
+				? "user"
+				: levelHeight(output) >= SPEECH_HEIGHT && output > input
+					? "assistant"
+					: undefined;
+		for (const role of ["user", "assistant"] as const)
+			this.loud[role] = role === speaking ? this.loud[role] + 1 : 0;
+		if (speaking && this.loud[speaking] >= 2 && this.speaker !== speaking) {
+			this.speaker = speaking;
+			if (this.sides[speaking].final) this.sides[speaking].text = "";
+		}
 	}
 
 	/** Three bars: the last three level samples; flat when no level arrives. */
@@ -203,7 +220,7 @@ export class VoiceEditorStatus {
 		const room = size - visibleWidth(head) - 1 - tag.length;
 		const words = spoken && room > 1 ? fit(spoken, room, true) : "";
 		const label = fit(
-			`${head} ${words ? `${tag}${words}` : status}`,
+			`${head} ${words ? `${tag}${words}` : this.speaker ? `${tag}…` : status}`,
 			size,
 			false,
 		);

@@ -259,3 +259,29 @@ describe("live status animation", () => {
 		expect(renders).toBe(0);
 	});
 });
+
+describe("speaker label follows who is audible", () => {
+	test("switches to 'you: …' as soon as the mic is loud, before a transcript", () => {
+		const { ctx } = fakeContextForTranscript();
+		const status = new VoiceEditorStatus();
+		status.setCall(ctx as never, {
+			status: "listening",
+			muted: false,
+			quiet: false,
+		});
+		status.transcript("assistant", "What are we getting into today?", true);
+		expect(status.labels(80).bottom).toContain("agent: ");
+		status.level(0.3, 0); // one loud sample is not enough (no flicker)
+		expect(status.labels(80).bottom).toContain("agent: ");
+		status.level(0.3, 0);
+		expect(status.labels(80).bottom).toMatch(/ you: … *$/);
+		status.transcript("user", "check the", false);
+		expect(status.labels(80).bottom).toMatch(/ you: check the *$/);
+		status.level(0.002, 0); // room noise does not switch it back
+		status.level(0.002, 0);
+		expect(status.labels(80).bottom).toContain("you: check the");
+		status.level(0, 0.3);
+		status.level(0, 0.3);
+		expect(status.labels(80).bottom).toMatch(/ agent: … *$/);
+	});
+});
