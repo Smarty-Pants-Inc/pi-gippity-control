@@ -16,7 +16,12 @@ type EditorFactory = NonNullable<
 export interface VoiceEditorLabels {
 	top: string;
 	bottom: string;
+	/** Whose side the block shows; each side has its own theme color. */
+	side?: "user" | "assistant" | undefined;
 }
+
+/** Theme tokens per side, so the colors follow /theme. */
+export const SIDE_COLORS = { user: "accent", assistant: "success" } as const;
 
 const MIN_BORDER_KEPT = 4;
 const LIVE_WIDTH = 40;
@@ -226,6 +231,7 @@ export class VoiceEditorStatus {
 		);
 		return {
 			top: "",
+			side: this.speaker,
 			bottom: label + " ".repeat(Math.max(0, size - visibleWidth(label))),
 		};
 	}
@@ -264,13 +270,13 @@ export class VoiceEditorStatus {
 				? previous(tui, theme, keybindings)
 				: new CustomEditor(tui, theme, keybindings);
 			const render = editor.render.bind(editor);
-			editor.render = (width: number) =>
-				decorateEditorBorders(
-					render(width),
-					width,
-					this.labels(width),
-					(text) => ctx.ui.theme.fg("accent", text),
+			editor.render = (width: number) => {
+				const labels = this.labels(width);
+				const color = labels.side ? SIDE_COLORS[labels.side] : "accent";
+				return decorateEditorBorders(render(width), width, labels, (text) =>
+					ctx.ui.theme.fg(color, text),
 				);
+			};
 			this.tui = tui;
 			return editor;
 		};
