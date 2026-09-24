@@ -2,6 +2,7 @@ import { WebSocket } from "ws";
 import { LanVoiceBrowserConnections } from "./browser-connections.ts";
 import { errorMessage } from "./browser-wire.ts";
 import type { LanVoiceDraftSelection } from "./draft.ts";
+import type { LanVoiceRtcCommand } from "./protocol.ts";
 
 export type LanVoiceBrowserMode = "conversation" | "dictation";
 
@@ -37,6 +38,13 @@ export interface LanVoiceBrowserClientsOptions {
 	onConversationInputTooQuiet(inputTooQuiet: boolean): void;
 	onConversationAudio(pcm: Buffer): void;
 	onDictationAudio(clientId: string, pcm: Buffer): void;
+	/**
+	 * Call media runs in the page (browser-direct). The call cannot move to
+	 * another page, so a closing or replaced owner page ends it.
+	 */
+	directMedia?: boolean | undefined;
+	/** A call-control message from the page that owns the call. */
+	onRtcMessage?(command: LanVoiceRtcCommand): void;
 }
 
 export class LanVoiceBrowserSession {
@@ -61,6 +69,27 @@ export class LanVoiceBrowserSession {
 
 	get closed(): boolean {
 		return this.state.type === "closed";
+	}
+
+	/** The socket of the page that is starting or holding the call. */
+	conversationSocket(): WebSocket | undefined {
+		const state = this.state;
+		return (state.type === "starting" || state.type === "active") &&
+			state.mode === "conversation"
+			? state.socket
+			: undefined;
+	}
+
+	/** Sends call control to the page that owns the call. */
+	sendConversationControl(message: unknown): boolean {
+		const socket = this.conversationSocket();
+		if (!socket || socket.readyState !== WebSocket.OPEN) return false;
+		socket.send(JSON.stringify(message));
+		return true;
+	}
+
+	get directMedia(): boolean {
+		return this.options.directMedia === true;
 	}
 
 	sendConversationAudio(pcm: Buffer): void {
@@ -181,7 +210,11 @@ export class LanVoiceBrowserSession {
 				});
 				previous.socket.close(4001, "replaced");
 			}
-			if (previous?.mode === "conversation" && mode !== "conversation") {
+			if (
+				previous?.mode === "conversation" &&
+				(mode !== "conversation" ||
+					(this.options.directMedia === true && previous.socket !== socket))
+			) {
 				this.conversationOwnerId = undefined;
 				await this.options.onConversationActivity(false);
 			}

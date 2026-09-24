@@ -70,6 +70,10 @@ The hosted page has **Microphone** and **Speaker** pickers. It matches devices b
 
 Bare `/gippity` starts the control server if it is not running and opens the page. A second `/gippity` during a call keeps the server and the call, and only opens the page again. Set `lan.openCommand` to open the page on another computer, for example `["ssh", "mac", "~/.local/bin/open-voice", "43120"]`. The command runs without a shell. It receives the page URL as one line on **stdin**, never as an argument, because other accounts can read process arguments. The URL is always shown too, as a fallback. The call starts when you press the page's voice button; browsers need that click before they allow microphone audio.
 
+### Call media (Smarty fork)
+
+By default the hosted page holds the call's own WebRTC connection to OpenAI (`lan.media: "direct"`). Call audio then never crosses the host or an SSH tunnel: it uses UDP, Opus and the browser's jitter buffer. The host still signals the call through the gateway and keeps all call control (delegation, replies, transcripts, mute); the page relays data-channel messages as small JSON over its tokened socket. A direct call belongs to the page that started it: closing that page ends the call. Set `lan.media: "relay"` to have the host hold the call and relay audio to the page, which lets a call move between devices. The media mode applies when the control server starts.
+
 ### Realtime through a gateway (Smarty fork)
 
 Set `voice.provider` to a Pi provider, such as a CLIProxyAPI gateway, to send realtime calls to `<provider baseUrl>/realtime/calls` with that provider's key. The gateway owns the ChatGPT login and account, so Pi needs no `openai-codex` login. Dictation still requires the `openai-codex` login.

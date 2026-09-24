@@ -37,7 +37,11 @@ export interface LanVoiceHttpHandlers {
 	webApp(): LanRemoteWebAppState;
 	rpc(body: Record<string, unknown>): Promise<unknown>;
 	inputMuted(): boolean;
-	audioDefaults(): { inputDevice?: string; outputDevice?: string };
+	audioDefaults(): {
+		inputDevice?: string;
+		outputDevice?: string;
+		media: "direct" | "relay";
+	};
 	remoteAppSnapshot(): GippityRemoteAppMessage | undefined;
 	remoteAppRoute(path: string): GippityRemoteAppRoute;
 	ownerIsActive(): boolean;

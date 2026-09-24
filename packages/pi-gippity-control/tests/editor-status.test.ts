@@ -212,3 +212,40 @@ function fakeContextForTranscript() {
 		},
 	};
 }
+
+describe("live status animation", () => {
+	test("renders at about 12 fps during a call and rises with call audio", async () => {
+		const { ctx } = fakeContextForTranscript();
+		const status = new VoiceEditorStatus();
+		status.setCall(ctx as never, {
+			status: "listening",
+			muted: false,
+			quiet: false,
+		});
+		const factory = (
+			ctx.ui.getEditorComponent as () => (...a: unknown[]) => unknown
+		)();
+		let renders = 0;
+		factory(
+			{
+				requestRender: () => (renders += 1),
+				terminal: { rows: 40, columns: 80 },
+			},
+			THEME,
+			{},
+		);
+		renders = 0;
+		await new Promise((resolve) => setTimeout(resolve, 500));
+		expect(renders).toBeGreaterThanOrEqual(5);
+		const quiet = status.wave();
+		status.audioActivity();
+		const loud = status.wave();
+		const height = (wave: string) =>
+			[...wave].reduce((sum, bar) => sum + "▁▂▃▄▅▆▇".indexOf(bar), 0);
+		expect(height(loud)).toBeGreaterThan(height(quiet));
+		status.setCall(ctx as never, undefined);
+		renders = 0;
+		await new Promise((resolve) => setTimeout(resolve, 200));
+		expect(renders).toBe(0);
+	});
+});

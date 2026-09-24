@@ -23,8 +23,9 @@ import { LanVoiceActivity } from "./activity.ts";
 import { createLanVoiceWebManifest } from "./app-assets.ts";
 import {
 	LanVoiceBrowserClients,
-	MAX_CONTROL_BYTES,
+	MAX_AUDIO_SOCKET_BYTES,
 } from "./browser-clients.ts";
+import { BrowserDirectRealtimePeer } from "./browser-direct-peer.ts";
 import { LanHostRealtimePeer } from "./browser-peer.ts";
 import { resolveLanVoiceCertificate } from "./certificate.ts";
 import { LAN_REMOTE_CLIENT_SCRIPT } from "./client-sdk-script.ts";
@@ -50,6 +51,8 @@ import {
 import { createLanVoiceWebUi } from "./web-ui.ts";
 
 const HEARTBEAT_MS = 15_000;
+
+type LanCallPeer = LanHostRealtimePeer | BrowserDirectRealtimePeer;
 
 export interface CodexLanVoiceServer {
 	readonly ownerSessionId: string;
@@ -102,6 +105,9 @@ export async function startCodexLanVoiceServer(options: {
 	};
 	const initialConfig = options.getConfig();
 	const bindHost = resolveLanBindHost(initialConfig.lan.host);
+	// Browser-direct: the page holds the call's media; relay: the host does.
+	const directMedia = initialConfig.lan.media !== "relay";
+	let directPeer: BrowserDirectRealtimePeer | undefined;
 	const access = new LanAccess();
 	const initialWebApp = resolveWebApp(initialConfig);
 	const certificate = await resolveLanVoiceCertificate(
@@ -110,7 +116,7 @@ export async function startCodexLanVoiceServer(options: {
 	const ownerIsActive = () =>
 		options.ctx.sessionManager.getSessionId() === options.ownerSessionId;
 	let activeConversation:
-		| { peer: LanHostRealtimePeer; conversation: CodexRealtimeConversation }
+		| { peer: LanCallPeer; conversation: CodexRealtimeConversation }
 		| undefined;
 	let conversationStart:
 		| {
@@ -160,23 +166,33 @@ export async function startCodexLanVoiceServer(options: {
 			onStatus: (status) =>
 				clients.broadcastControl({ type: "status", status }),
 			createPeer: () => {
-				let peer!: LanHostRealtimePeer;
+				let peer!: LanCallPeer;
+				const onSpeakerSuppressed = (suppressed: boolean) => {
+					if (activeConversation?.peer === peer)
+						clients.setConversationSpeakerSuppressed(suppressed);
+				};
+				if (directMedia) {
+					const direct = new BrowserDirectRealtimePeer({
+						send: (message) => clients.sendConversationControl(message),
+						onSpeakerSuppressed,
+					});
+					directPeer = direct;
+					peer = direct;
+					return peer;
+				}
 				peer = new LanHostRealtimePeer({
 					onAudio: (pcm) => {
 						if (activeConversation?.peer === peer)
 							clients.sendConversationAudio(pcm);
 					},
-					onSpeakerSuppressed: (suppressed) => {
-						if (activeConversation?.peer === peer)
-							clients.setConversationSpeakerSuppressed(suppressed);
-					},
+					onSpeakerSuppressed,
 				});
 				return peer;
 			},
 			onActive: (conversation, peer) => {
 				activated = true;
 				activeConversation = {
-					peer: peer as LanHostRealtimePeer,
+					peer: peer as LanCallPeer,
 					conversation,
 				};
 				clients.setConversationSpeakerSuppressed(
@@ -210,6 +226,8 @@ export async function startCodexLanVoiceServer(options: {
 		return promise;
 	};
 	clients = new LanVoiceBrowserClients({
+		directMedia,
+		onRtcMessage: (command) => directPeer?.browserMessage(command),
 		ensureConversation,
 		async startDictation(clientId) {
 			await dictation.start(clientId);
@@ -276,7 +294,10 @@ export async function startCodexLanVoiceServer(options: {
 				clients,
 				draft,
 				inputMuted: () => options.voice.inputMuted,
-				audioDefaults: () => ({ ...options.getConfig().lan.audio }),
+				audioDefaults: () => ({
+					...options.getConfig().lan.audio,
+					media: directMedia ? "direct" : "relay",
+				}),
 				remoteAppSnapshot: () => options.remoteApps.snapshot(),
 				remoteAppRoute: (path) => options.remoteApps.route(path),
 				renderManifest: () => createLanVoiceWebManifest(options.ctx.ui.theme),
@@ -316,7 +337,7 @@ export async function startCodexLanVoiceServer(options: {
 	);
 	const webSockets = new WebSocketServer({
 		noServer: true,
-		maxPayload: MAX_CONTROL_BYTES,
+		maxPayload: MAX_AUDIO_SOCKET_BYTES,
 		handleProtocols: (protocols) =>
 			protocols.has(LAN_AUDIO_SUBPROTOCOL) ? LAN_AUDIO_SUBPROTOCOL : false,
 	});
