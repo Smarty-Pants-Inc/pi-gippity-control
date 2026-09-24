@@ -285,3 +285,42 @@ describe("speaker label follows who is audible", () => {
 		expect(status.labels(80).bottom).toMatch(/ agent: … *$/);
 	});
 });
+
+describe("status colors per side", () => {
+	test("Paul's side uses the accent token, the agent's side the success token", () => {
+		const used: string[] = [];
+		let factory: unknown;
+		const ctx = {
+			mode: "tui",
+			ui: {
+				theme: {
+					fg: (name: string, text: string) => {
+						used.push(name);
+						return text;
+					},
+				},
+				getEditorComponent: () => factory,
+				setEditorComponent: (next: unknown) => {
+					factory = next;
+				},
+			},
+		};
+		const status = new VoiceEditorStatus();
+		status.setCall(ctx as never, {
+			status: "listening",
+			muted: false,
+			quiet: false,
+		});
+		const editor = (
+			factory as (...a: unknown[]) => { render(w: number): string[] }
+		)(TUI, THEME, {});
+		status.transcript("user", "check the build", false);
+		used.length = 0;
+		editor.render(80);
+		expect(used).toEqual(["accent"]);
+		status.transcript("assistant", "It is green", false);
+		used.length = 0;
+		editor.render(80);
+		expect(used).toEqual(["success"]);
+	});
+});
