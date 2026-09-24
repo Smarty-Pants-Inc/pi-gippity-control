@@ -26,6 +26,7 @@ interface RealtimeSessionLifecycle
 		text: string,
 		final: boolean,
 	): void;
+	onAudioActivity?(): void;
 }
 
 interface DictationSessionLifecycle
@@ -75,6 +76,9 @@ export async function startControllerConversation(options: {
 			onTranscriptTail: options.lifecycle.onTranscriptTail,
 			...(options.lifecycle.onLiveTranscript
 				? { onLiveTranscript: options.lifecycle.onLiveTranscript }
+				: {}),
+			...(options.lifecycle.onAudioActivity
+				? { onAudioActivity: options.lifecycle.onAudioActivity }
 				: {}),
 		},
 		realtimePeer,

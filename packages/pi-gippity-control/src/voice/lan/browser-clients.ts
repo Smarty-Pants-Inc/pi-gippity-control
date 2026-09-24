@@ -6,15 +6,26 @@ import {
 	LanVoiceBrowserSession,
 } from "./browser-session.ts";
 import { decodeLanVoiceBrowserInput, errorMessage } from "./browser-wire.ts";
+import type { LanVoiceRtcCommand } from "./protocol.ts";
 
-export { MAX_CONTROL_BYTES } from "./browser-wire.ts";
+export {
+	MAX_AUDIO_SOCKET_BYTES,
+	MAX_CONTROL_BYTES,
+} from "./browser-wire.ts";
 
 export class LanVoiceBrowserClients {
 	private readonly connections = new LanVoiceBrowserConnections();
 	private readonly session: LanVoiceBrowserSession;
 
+	private readonly options: LanVoiceBrowserClientsOptions;
+
 	constructor(options: LanVoiceBrowserClientsOptions) {
+		this.options = options;
 		this.session = new LanVoiceBrowserSession(options, this.connections);
+	}
+
+	sendConversationControl(message: unknown): boolean {
+		return this.session.sendConversationControl(message);
 	}
 
 	connectEvents(clientId: string, response: ServerResponse): void {
@@ -27,7 +38,11 @@ export class LanVoiceBrowserClients {
 				this.receive(clientId, socket, data, isBinary),
 			onReplaced: (previous) =>
 				this.session.releaseStarting(clientId, previous),
-			onClose: () => this.session.release(clientId, socket),
+			// Browser-direct media lives in the page, so its closing ends the call.
+			onClose: () =>
+				this.session
+					.release(clientId, socket, this.session.directMedia)
+					.catch(() => {}),
 		});
 	}
 
@@ -92,6 +107,11 @@ export class LanVoiceBrowserClients {
 				return;
 			}
 			const message = input.command;
+			if (message.type.startsWith("rtc.")) {
+				if (socket === this.session.conversationSocket())
+					this.options.onRtcMessage?.(message as LanVoiceRtcCommand);
+				return;
+			}
 			if (message.type === "start") {
 				void this.session
 					.claim(clientId, socket, message.mode)

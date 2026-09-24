@@ -177,6 +177,11 @@ export class CodexVoiceController {
 		return prepareRealtimeVoicePrompt(ctx);
 	}
 
+	/** True while this plan's call is running or resuming after a drop. */
+	ownsPeerPlan(plan: RealtimePeerPlan): boolean {
+		return this.runtime.realtimePeerPlan === plan;
+	}
+
 	/** False once the call ended by any path, such as /gippity stop. */
 	isCurrentConversation(session: CodexRealtimeConversation): boolean {
 		return this.currentSession() === session;
@@ -242,6 +247,7 @@ export class CodexVoiceController {
 			onStatus: (status) => this.renderStatus(status),
 			onLiveTranscript: (role, text, final) =>
 				this.editorStatus?.transcript(role, text, final),
+			onAudioActivity: () => this.editorStatus?.audioActivity(),
 		});
 		const activePrompt = Array.from(this.activePrompts.values()).at(-1);
 		if (session && activePrompt) session.announcePrompt(activePrompt);

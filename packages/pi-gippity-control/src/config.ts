@@ -45,6 +45,12 @@ export interface GippityControlConfig {
 		 * gets the page URL on stdin, for example ["ssh", "mac", "open-voice"].
 		 */
 		openCommand?: string[] | undefined;
+		/**
+		 * Where call media runs for the hosted page: "direct" (default) makes the
+		 * page's own WebRTC connection; "relay" relays host audio over the page
+		 * socket and lets a call move between devices.
+		 */
+		media?: "direct" | "relay" | undefined;
 		/** Browser audio devices for the hosted page, matched by label. */
 		audio?: { inputDevice?: string; outputDevice?: string } | undefined;
 	};
@@ -179,6 +185,9 @@ export function normalizeGippityControlConfig(
 			...(port ? { port } : {}),
 			...(host ? { host } : {}),
 			...(openCommand ? { openCommand } : {}),
+			...(lan["media"] === "relay" || lan["media"] === "direct"
+				? { media: lan["media"] }
+				: {}),
 			...(browserInput || browserOutput
 				? {
 						audio: {

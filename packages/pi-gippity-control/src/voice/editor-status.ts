@@ -22,9 +22,11 @@ const MIN_BORDER_KEPT = 4;
 const LIVE_WIDTH = 40;
 const LIVE_SHARE = 0.45;
 const TRANSCRIPT_CHARS = 400;
-const WAVE_FRAMES = ["▁▃▅", "▂▅▇", "▃▇▅", "▅▇▃", "▇▅▂", "▅▃▁"];
-const ANIMATED = new Set(["listening", "speaking", "responding", "recording"]);
-const FRAME_MS = 160;
+const LEVELS = "▁▂▃▄▅▆▇";
+/** About 12 fps: smooth, and cheap for the TUI. */
+const FRAME_MS = 80;
+/** Call audio counts as active this long after the last report. */
+const ACTIVITY_MS = 250;
 
 /** The live status block width: fixed per terminal width, so it never jitters. */
 export function liveStatusWidth(width: number): number {
@@ -118,6 +120,9 @@ export class VoiceEditorStatus {
 		assistant: { text: "", final: false },
 	};
 	private speaker: "user" | "assistant" | undefined;
+	private lastAudio = 0;
+	/** Test hook: frames rendered, and the clock. */
+	now: () => number = Date.now;
 
 	/** Returns false when Pi has no TUI editor; callers then use the footer. */
 	setCall(
@@ -141,6 +146,23 @@ export class VoiceEditorStatus {
 		return true;
 	}
 
+	/** Call audio is playing; the wave rises until activity stops. */
+	audioActivity(): void {
+		this.lastAudio = this.now();
+	}
+
+	/** Three bars: tall and moving while audio plays, a low ripple otherwise. */
+	wave(): string {
+		const loud = this.now() - this.lastAudio < ACTIVITY_MS;
+		return [0, 1, 2]
+			.map((bar) => {
+				const phase = (this.frame + bar * 2) % 6;
+				const height = loud ? 3 + Math.abs(3 - phase) : phase === 0 ? 1 : 0;
+				return LEVELS[Math.min(LEVELS.length - 1, height)];
+			})
+			.join("");
+	}
+
 	transcript(role: "user" | "assistant", text: string, final: boolean): void {
 		const side = this.sides[role];
 		if (final) side.text = text;
@@ -160,9 +182,7 @@ export class VoiceEditorStatus {
 		if (!this.call) return { top: "", bottom: this.lan ? "GipPity LAN" : "" };
 		const size = liveStatusWidth(width);
 		const { status, muted, quiet } = this.call;
-		const wave = ANIMATED.has(status)
-			? (WAVE_FRAMES[this.frame % WAVE_FRAMES.length] ?? "")
-			: "▁▁▁";
+		const wave = this.wave();
 		// While someone speaks, the tag names them and the words fill the block;
 		// between turns the phase shows instead.
 		const head = `${wave}${muted ? " muted" : quiet ? " quiet" : ""}`;
@@ -196,7 +216,7 @@ export class VoiceEditorStatus {
 		const wanted = this.lan || this.call !== undefined;
 		if (wanted && !this.factory && this.ctx) this.install(this.ctx);
 		if (!wanted && this.factory) this.uninstall();
-		const animate = this.call !== undefined && ANIMATED.has(this.call.status);
+		const animate = this.call !== undefined;
 		if (animate && !this.timer) {
 			this.timer = setInterval(() => {
 				this.frame += 1;

@@ -14,6 +14,7 @@ export class LanHostRealtimePeer implements CodexRealtimeWebRtcPeer {
 	private readonly onSpeakerSuppressed: (suppressed: boolean) => void;
 	private playbackEpoch = 0;
 	private speakerSuppressed = false;
+	private lastActivity = 0;
 
 	constructor(options: {
 		onAudio(pcm: Buffer): void;
@@ -33,6 +34,12 @@ export class LanHostRealtimePeer implements CodexRealtimeWebRtcPeer {
 				if (this.speakerSuppressed || event.epoch !== this.playbackEpoch)
 					return;
 				this.onAudio(Buffer.from(event.audio, "base64"));
+				// Relayed audio is playing; report it at most 10 times a second.
+				const now = Date.now();
+				if (now - this.lastActivity >= 100) {
+					this.lastActivity = now;
+					listener({ type: "playback_activity" });
+				}
 				return;
 			}
 			const peerEvent = toPeerEvent(event);

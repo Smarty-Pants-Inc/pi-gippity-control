@@ -8,7 +8,26 @@ export type LanVoiceAudioCommand =
 			selection: { start: number; end: number };
 	  }
 	| { type: "release" }
-	| { type: "cancel" };
+	| { type: "cancel" }
+	| LanVoiceRtcCommand;
+
+/** Messages from a page that holds the call's RTCPeerConnection. */
+export type LanVoiceRtcCommand =
+	| { type: "rtc.offer"; sdp: string }
+	| { type: "rtc.data"; message: Record<string, unknown> }
+	| { type: "rtc.state"; state: string }
+	| { type: "rtc.playback"; level: number }
+	| { type: "rtc.error"; message: string };
+
+const RTC_STATES = new Set([
+	"ready",
+	"connecting",
+	"connected",
+	"disconnected",
+	"failed",
+	"closed",
+]);
+const MAX_RTC_SDP_BYTES = 256 * 1024;
 
 export function decodeLanVoiceAudioCommand(
 	value: unknown,
@@ -61,6 +80,53 @@ export function decodeLanVoiceAudioCommand(
 	}
 	if (value.type === "release" || value.type === "cancel")
 		return { type: value.type };
+	return decodeRtcCommand(value);
+}
+
+function decodeRtcCommand(
+	value: object & { type: unknown },
+): LanVoiceRtcCommand {
+	const record = value as Record<string, unknown>;
+	if (value.type === "rtc.offer") {
+		const sdp = record["sdp"];
+		if (
+			typeof sdp !== "string" ||
+			!sdp.startsWith("v=0") ||
+			Buffer.byteLength(sdp) > MAX_RTC_SDP_BYTES
+		)
+			throw invalidCommand();
+		return { type: "rtc.offer", sdp };
+	}
+	if (value.type === "rtc.data") {
+		const message = record["message"];
+		if (!message || typeof message !== "object" || Array.isArray(message))
+			throw invalidCommand();
+		return { type: "rtc.data", message: message as Record<string, unknown> };
+	}
+	if (value.type === "rtc.state") {
+		const state = record["state"];
+		if (typeof state !== "string" || !RTC_STATES.has(state))
+			throw invalidCommand();
+		return { type: "rtc.state", state };
+	}
+	if (value.type === "rtc.playback") {
+		const level = record["level"];
+		return {
+			type: "rtc.playback",
+			level:
+				typeof level === "number" && Number.isFinite(level)
+					? Math.min(1, Math.max(0, level))
+					: 0,
+		};
+	}
+	if (value.type === "rtc.error") {
+		const message = record["message"];
+		if (typeof message !== "string") throw invalidCommand();
+		return {
+			type: "rtc.error",
+			message: message.slice(0, 500) || "Browser call failed",
+		};
+	}
 	throw invalidCommand();
 }
 

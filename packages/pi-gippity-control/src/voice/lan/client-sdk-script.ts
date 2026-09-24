@@ -37,6 +37,64 @@ export const LAN_REMOTE_CLIENT_SCRIPT = String.raw`
     return global.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2) + Date.now().toString(36);
   }
 
+  // Browser-direct media: this page holds the call's RTCPeerConnection to
+  // OpenAI. The host signals the call and exchanges data-channel messages
+  // through the page's audio socket; audio never crosses the host.
+  function createDirectCall({ stream, send, devices }) {
+    const pc = new RTCPeerConnection();
+    const audio = new Audio(); audio.autoplay = true;
+    let closed = false, levelTimer;
+    for (const track of stream.getAudioTracks()) pc.addTrack(track, stream);
+    const channel = pc.createDataChannel('oai-events');
+    channel.onopen = () => send({ type:'rtc.state', state:'ready' });
+    channel.onmessage = (event) => {
+      try {
+        const message = JSON.parse(event.data);
+        if (message && typeof message === 'object' && !Array.isArray(message)) send({ type:'rtc.data', message });
+      } catch {}
+    };
+    pc.onconnectionstatechange = () => {
+      const state = pc.connectionState;
+      if (['connecting', 'connected', 'disconnected', 'failed', 'closed'].includes(state)) send({ type:'rtc.state', state });
+    };
+    pc.ontrack = (event) => {
+      audio.srcObject = event.streams[0] || new MediaStream([event.track]);
+      void devices.attach(audio); void audio.play().catch(() => {});
+      clearInterval(levelTimer);
+      levelTimer = setInterval(() => {
+        const level = event.receiver.getSynchronizationSources?.()[0]?.audioLevel ?? 0;
+        call.level = level;
+        if (level > 0.01) send({ type:'rtc.playback', level });
+      }, 80);
+    };
+    const call = {
+      pc, audio, level:0,
+      async offer() {
+        await pc.setLocalDescription(await pc.createOffer());
+        if (pc.iceGatheringState !== 'complete')
+          await new Promise((resolve) => {
+            const timer = setTimeout(resolve, 2000);
+            pc.addEventListener('icegatheringstatechange', () => { if (pc.iceGatheringState === 'complete') { clearTimeout(timer); resolve(); } });
+          });
+        return pc.localDescription.sdp;
+      },
+      answer(sdp) { return pc.setRemoteDescription({ type:'answer', sdp }); },
+      send(message) {
+        if (channel.readyState === 'open') channel.send(JSON.stringify(message));
+        else send({ type:'rtc.error', message:'DataChannel is not opened' });
+      },
+      setSpeakerSuppressed(suppressed) { audio.muted = Boolean(suppressed); },
+      close() {
+        if (closed) return; closed = true;
+        clearInterval(levelTimer); devices.detach(audio);
+        audio.pause(); audio.srcObject = null;
+        try { channel.close(); } catch {}
+        pc.close();
+      },
+    };
+    return call;
+  }
+
   async function createRealtimeAudio(stream) {
     const context = new AudioContext({ latencyHint:'interactive' });
     let source, microphoneBuffer, processor;
@@ -84,7 +142,7 @@ export const LAN_REMOTE_CLIENT_SCRIPT = String.raw`
   }
 
   function createAudio(client, assertOpen) {
-    let socket, stream, context, source, processor, realtimeAudio;
+    let socket, stream, context, source, processor, realtimeAudio, directCall;
     let mode = 'conversation';
     let active = false, muted = false, inputTooQuiet = false, busy = false, finishing = false, starting = false;
     let generation = 0;
@@ -97,6 +155,7 @@ export const LAN_REMOTE_CLIENT_SCRIPT = String.raw`
       client._emit('audio', snapshot());
     };
     const closeHardware = () => {
+      directCall?.close(); directCall = undefined;
       const currentRealtime = realtimeAudio; realtimeAudio = undefined;
       if (currentRealtime) currentRealtime.close();
       else { processor?.disconnect(); source?.disconnect(); void context?.close().catch(() => {}); }
@@ -153,7 +212,18 @@ export const LAN_REMOTE_CLIENT_SCRIPT = String.raw`
         const message = JSON.parse(event.data);
         if (message.type === 'stop') { finishStop(false, message.reason || 'server'); return; }
         if (message.type === 'mute') setMuted(message.muted, false);
-        if (message.type === 'speaker_suppressed') realtimeAudio?.setSpeakerSuppressed(message.suppressed);
+        if (message.type === 'speaker_suppressed') { realtimeAudio?.setSpeakerSuppressed(message.suppressed); directCall?.setSpeakerSuppressed(message.suppressed); }
+        if (message.type === 'rtc.offer.request' && stream) {
+          directCall?.close();
+          const reply = (value) => { if (socket === current && current.readyState === WebSocket.OPEN) current.send(JSON.stringify(value)); };
+          const call = directCall = createDirectCall({ stream, send:reply, devices:client.devices });
+          void call.offer().then((sdp) => { if (directCall === call) reply({ type:'rtc.offer', sdp }); },
+            (error) => reply({ type:'rtc.error', message:error instanceof Error ? error.message : String(error) }));
+          return;
+        }
+        if (message.type === 'rtc.answer') { void directCall?.answer(message.sdp).catch((error) => current.send(JSON.stringify({ type:'rtc.error', message:String(error?.message || error) }))); return; }
+        if (message.type === 'rtc.send') { directCall?.send(message.message); return; }
+        if (message.type === 'rtc.close') { directCall?.close(); directCall = undefined; return; }
         if (message.type === 'active') {
           active = true; busy = false; finishing = false;
           if (mode === 'conversation') {
@@ -194,7 +264,9 @@ export const LAN_REMOTE_CLIENT_SCRIPT = String.raw`
           stream = await navigator.mediaDevices.getUserMedia({ audio:client.devices.inputConstraints(microphone) });
           if (currentGeneration !== generation) { closeHardware(); return; }
         }
-        if (mode === 'conversation') {
+        if (mode === 'conversation' && client.media === 'direct') {
+          // The call's media is set up when the host asks for an offer.
+        } else if (mode === 'conversation') {
           realtimeAudio = await createRealtimeAudio(stream);
           context = realtimeAudio.context; processor = realtimeAudio.processor;
           await client.devices.attach(context);
@@ -218,14 +290,14 @@ export const LAN_REMOTE_CLIENT_SCRIPT = String.raw`
           if (socket !== current || current.readyState !== WebSocket.CONNECTING) return;
           finishStop(false, 'connect-timeout'); publish('error', 'Connection timed out.');
         }, 10000);
-        processor.port.onmessage = (event) => {
+        if (processor) processor.port.onmessage = (event) => {
           const pcm = realtimeAudio
             ? realtimeAudio.acceptCapture(event.data)
             : event.data?.type === 'capture' && event.data.epoch === 0 && event.data.pcm instanceof ArrayBuffer ? event.data.pcm : undefined;
           if (pcm && active && !muted && socket === current && current.readyState === WebSocket.OPEN && current.bufferedAmount < 65536) current.send(pcm);
         };
         current.onopen = () => {
-          if (socket !== current || !context) return;
+          if (socket !== current || !stream) return;
           clearTimeout(timer); current.send(JSON.stringify({ type:'start', mode })); publish('connecting');
         };
         current.onmessage = (event) => receive(current, event);
@@ -257,6 +329,10 @@ export const LAN_REMOTE_CLIENT_SCRIPT = String.raw`
       setMuted(...args) { assertOpen(); return setMuted(...args); },
       get state() { return snapshot(); },
       _serverCommand: serverCommand,
+      /** Browser-direct call stats (RTCStatsReport), for diagnostics. */
+      _callStats() { return directCall?.pc.getStats(); },
+      /** Output level 0..1 of the direct call, for visualizers. */
+      get level() { return directCall?.level ?? 0; },
       _pagehide() {
         stream?.getTracks().forEach((track) => track.stop());
 		if (finishing && socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type:'cancel' }));
@@ -384,7 +460,7 @@ export const LAN_REMOTE_CLIENT_SCRIPT = String.raw`
       try {
         const command = JSON.parse(data);
         client.audio._serverCommand(command);
-        if (command.type === 'audio.defaults') client.devices.setDefaults(command);
+        if (command.type === 'audio.defaults') { client.devices.setDefaults(command); client.media = command.media === 'relay' ? 'relay' : 'direct'; }
         if (command.type === 'draft') applyDraft(command);
         else emit(command.type, command);
 		if (command.type === 'pi.event') emit('pi:' + command.event, command.data, false);

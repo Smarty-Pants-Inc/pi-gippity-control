@@ -23,6 +23,7 @@ function fakeVoice() {
 		setInputMuted: () => true,
 		setConversationInputActive() {},
 		isCurrentConversation: (session: object) => session === current,
+		ownsPeerPlan: () => current !== undefined,
 		async startRealtimeWithPeerPlan(
 			_ctx: unknown,
 			_config: unknown,
