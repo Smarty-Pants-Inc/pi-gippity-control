@@ -1,0 +1,5 @@
+2026-09-24T01:04:22.956Z call up (browser-direct); sampling Pi status line against the mic level
+2026-09-24T01:04:47.058Z samples=179; bar height (0-18) while mic LOUD: avg 14.82 over 90; while QUIET and voice silent: avg 0.01 over 78
+2026-09-24T01:04:47.058Z example loud waves: ▅▆▇ ▆▇▇ ▇▅▅ ▅▅▇ ▇▅▄ ▅▇▅ ▁▃▃ ▃▃▅; example quiet waves: ▁▁▁ ▁▁▁ ▁▁▁ ▁▁▁ ▁▁▁ ▁▁▁ ▁▁▁ ▁▁▁
+2026-09-24T01:04:47.059Z label while mic LOUD: 'you:' in 84 of 90 samples; examples: "▇ you: …                               ─" "▇ you: …                               ─" "▅ you: …                               ─" "▇ you: …                               ─"
+2026-09-24T01:04:49.002Z video: /tmp/gip-e2e3/out/video/page@c0b30b2949a8d7cf1f5605b9129ceaf8.webm
