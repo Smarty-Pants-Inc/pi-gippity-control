@@ -23,7 +23,8 @@ env:
 
 jobs:
   typecheck:
-    runs-on: ubuntu-24.04
+    # Depot overflow (smarty-dev#2267, Paul YES 2026-10-02): ordinary pull_request runs only; queue drafts, priority-ci, push and other events keep their runner.
+    runs-on: ${{ (startsWith(github.ref, 'refs/heads/mergify/merge-queue/') || startsWith(github.ref, 'refs/heads/tmp-mergify/merge-queue/') || startsWith(github.head_ref, 'mergify/merge-queue/') || startsWith(github.head_ref, 'tmp-mergify/merge-queue/') || contains(github.event.pull_request.labels.*.name, 'priority-ci')) && 'ubuntu-24.04' || github.event_name == 'pull_request' && 'depot-ubuntu-24.04' || 'ubuntu-24.04' }}
     steps:
       - uses: actions/checkout@v6
       - uses: oven-sh/setup-bun@v2
@@ -33,7 +34,8 @@ jobs:
       - run: bun run --cwd "$PACKAGE_DIR" typecheck
 
   test:
-    runs-on: ubuntu-24.04
+    # Depot overflow (smarty-dev#2267, Paul YES 2026-10-02): ordinary pull_request runs only; queue drafts, priority-ci, push and other events keep their runner.
+    runs-on: ${{ (startsWith(github.ref, 'refs/heads/mergify/merge-queue/') || startsWith(github.ref, 'refs/heads/tmp-mergify/merge-queue/') || startsWith(github.head_ref, 'mergify/merge-queue/') || startsWith(github.head_ref, 'tmp-mergify/merge-queue/') || contains(github.event.pull_request.labels.*.name, 'priority-ci')) && 'ubuntu-24.04' || github.event_name == 'pull_request' && 'depot-ubuntu-24.04' || 'ubuntu-24.04' }}
     steps:
       - uses: actions/checkout@v6
       - uses: oven-sh/setup-bun@v2
@@ -43,7 +45,8 @@ jobs:
       - run: bun run --cwd "$PACKAGE_DIR" test
 
   lint:
-    runs-on: ubuntu-24.04
+    # Depot overflow (smarty-dev#2267, Paul YES 2026-10-02): ordinary pull_request runs only; queue drafts, priority-ci, push and other events keep their runner.
+    runs-on: ${{ (startsWith(github.ref, 'refs/heads/mergify/merge-queue/') || startsWith(github.ref, 'refs/heads/tmp-mergify/merge-queue/') || startsWith(github.head_ref, 'mergify/merge-queue/') || startsWith(github.head_ref, 'tmp-mergify/merge-queue/') || contains(github.event.pull_request.labels.*.name, 'priority-ci')) && 'ubuntu-24.04' || github.event_name == 'pull_request' && 'depot-ubuntu-24.04' || 'ubuntu-24.04' }}
     steps:
       - uses: actions/checkout@v6
       - uses: oven-sh/setup-bun@v2
